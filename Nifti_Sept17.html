@@ -9328,6 +9328,12 @@ function renderPaymentPanel(id){
   return `<div class="spine-inline-action" style="margin-top:8px;">
     <button class="btn btn-outline" style="margin-bottom:10px;" onclick="event.stopPropagation(); openPayNowPanel('${id}')">💳 Show Payment QR Codes</button>
     <div id="payNowPanel_${id}"></div>
+    ${myBusiness ? `<div style="margin-bottom:14px;padding:12px;border:1.5px solid var(--green);border-radius:10px;">
+      <div style="font-weight:700;margin-bottom:6px;">Pay with GCash — real payment (sandbox/test mode)</div>
+      <div style="font-size:14px;color:var(--ink);opacity:.8;margin-bottom:8px;">Opens an actual PayMongo GCash checkout. The invoice only marks itself paid once PayMongo confirms the payment went through — not on your say-so.</div>
+      <button class="btn btn-primary" onclick="event.stopPropagation(); startGcashPayment('${id}')">Pay ${fmtPHP(balance)} with GCash →</button>
+      <div id="gcashPayError_${id}" style="font-size:14px;color:var(--danger);font-weight:600;margin-top:6px;"></div>
+    </div>` : ''}
     ${historyHtml}
     <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:10px;">Balance due: ${fmtPHP(balance)}${totalPaid>0 ? ` (of ${fmtPHP(total)})` : ''}</div>
     <div class="row-2">
@@ -9352,6 +9358,16 @@ function renderPaymentPanel(id){
     <input type="file" id="paidProof_${id}" accept="image/*" style="margin-bottom:10px;">
     <button class="btn btn-primary" onclick="event.stopPropagation(); submitRecordPayment('${id}')">Record payment →</button>
   </div>`;
+}
+async function startGcashPayment(id){
+  const errEl = document.getElementById('gcashPayError_'+id);
+  if(errEl) errEl.textContent = '';
+  const { data, error } = await sb.functions.invoke('create-gcash-payment', { body: { po_id: id } });
+  if(error || !data || data.error){
+    if(errEl) errEl.textContent = (data && data.error) || (error && error.message) || 'Could not start payment. Try again.';
+    return;
+  }
+  window.location.href = data.checkout_url; // real PayMongo (test mode) GCash checkout
 }
 function togglePaymentFields(id){
   const method = document.getElementById('payMethod_'+id).value;
