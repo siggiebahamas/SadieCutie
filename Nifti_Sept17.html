@@ -2454,7 +2454,120 @@ async function loadMyBusinessContext(){
   myBusiness = tm.businesses;
   currentAppRole = myBusiness.type; // 'buyer' or 'supplier' — fixed by the account, not togglable
   currentUserId = tm.id;
+  if(myBusiness.type === 'buyer') ME_BUYER = myBusiness.id; else ME_SUPPLIER = myBusiness.id;
   return true;
+}
+
+/* ============ PURCHASE ORDER SYNC (Phase 4, batch 1) ============
+   purchaseOrders itself stays the single source every render function already reads from —
+   nothing below changes how a PO is displayed. What changes: where its contents come FROM
+   (Supabase instead of the hardcoded seed array, once a real account is signed in) and where
+   every mutation goes TO (an upsert back to Supabase, via the one chokepoint — poLogHistory —
+   that every status-changing action in the app already calls). Demo/unauthenticated sessions
+   (myBusiness===null) never touch any of this; the original seed-data experience is untouched. */
+
+function newPoId(){
+  return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'po_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+}
+
+// Small cache so a Realtime event (which carries only the raw row, no join) doesn't need a
+// round trip just to show a name we've already seen this session.
+const businessNameCache = {};
+async function getBusinessName(businessId){
+  if(!businessId) return '';
+  if(businessNameCache[businessId]) return businessNameCache[businessId];
+  const { data } = await sb.from('businesses').select('name').eq('id', businessId).single();
+  const name = (data && data.name) || '';
+  if(name) businessNameCache[businessId] = name;
+  return name;
+}
+
+// Supabase row (snake_case) -> the exact camelCase shape every render function already expects.
+async function mapPoRowToJs(row){
+  const buyerName = await getBusinessName(row.buyer_business_id);
+  const supplierName = await getBusinessName(row.supplier_business_id);
+  return {
+    id: row.id, poNumber: row.po_number,
+    buyerId: row.buyer_business_id, buyerName,
+    supplierId: row.supplier_business_id, supplierName,
+    type: row.type, status: row.status, currency: row.currency, taxRate: Number(row.tax_rate),
+    lineItems: row.line_items || [],
+    createdDate: row.created_date, requestedDeliveryDate: row.requested_delivery_date,
+    deliveryAddress: row.delivery_address, notes: row.notes || '',
+    shipping: row.shipping, customs: row.customs, invoice: row.invoice, counter: row.counter,
+    deliveryConfirmation: row.delivery_confirmation, atRisk: row.at_risk, riskNote: row.risk_note || '',
+    history: row.history || [],
+  };
+}
+
+// The reverse — a JS-side po object -> the row shape purchase_orders expects.
+function mapPoJsToRow(po){
+  return {
+    id: po.id, po_number: po.poNumber,
+    buyer_business_id: po.buyerId, supplier_business_id: po.supplierId,
+    type: po.type || 'local', status: po.status, currency: po.currency || 'PHP', tax_rate: po.taxRate || 0,
+    line_items: po.lineItems || [],
+    created_date: po.createdDate, requested_delivery_date: po.requestedDeliveryDate || null,
+    delivery_address: po.deliveryAddress || null, notes: po.notes || null,
+    shipping: po.shipping || null, customs: po.customs || null, invoice: po.invoice || null,
+    counter: po.counter || null, delivery_confirmation: po.deliveryConfirmation || null,
+    at_risk: !!po.atRisk, risk_note: po.riskNote || null,
+    history: po.history || [],
+  };
+}
+
+// Fire-and-forget: called from poLogHistory after every status-changing action. Only succeeds
+// for POs whose buyerId/supplierId are both real connected businesses — a demo-seed PO (fake
+// mnemonic ids like 'balintawak') or one created against a not-yet-connected counterparty will
+// fail the foreign key and is silently skipped, logged to console, never surfaced as a broken
+// UI: the local optimistic update (what the user actually sees) already happened before this
+// runs, exactly as it did before Supabase existed.
+async function syncPoToSupabase(po){
+  if(!myBusiness) return; // demo/unauthenticated session — nothing to sync
+  try{
+    const { error } = await sb.from('purchase_orders').upsert(mapPoJsToRow(po));
+    if(error) console.warn('PO sync skipped for', po.poNumber, '—', error.message);
+  }catch(e){ console.warn('PO sync failed for', po.poNumber, e); }
+}
+
+async function loadRealPurchaseOrders(){
+  if(!myBusiness) return;
+  const { data, error } = await sb.from('purchase_orders')
+    .select('*')
+    .or(`buyer_business_id.eq.${myBusiness.id},supplier_business_id.eq.${myBusiness.id}`);
+  if(error){ console.warn('Could not load purchase orders:', error.message); return; }
+  const mapped = await Promise.all((data||[]).map(mapPoRowToJs));
+  purchaseOrders.length = 0;
+  purchaseOrders.push(...mapped);
+}
+
+// Two subscriptions, not one — Realtime filters can't express "buyer OR supplier" across two
+// columns in a single filter, so each side of a relationship gets its own channel.
+let poRealtimeChannels = [];
+function subscribeToPurchaseOrders(){
+  if(!myBusiness) return;
+  poRealtimeChannels.forEach(ch => sb.removeChannel(ch));
+  poRealtimeChannels = [];
+  const onChange = async (payload) => {
+    const row = payload.new && payload.new.id ? payload.new : payload.old;
+    if(!row || !row.id) return;
+    const idx = purchaseOrders.findIndex(p=>p.id===row.id);
+    if(payload.eventType === 'DELETE'){
+      if(idx>-1) purchaseOrders.splice(idx,1);
+    } else {
+      const mapped = await mapPoRowToJs(payload.new);
+      if(idx>-1) purchaseOrders[idx] = mapped; else purchaseOrders.push(mapped);
+    }
+    if(document.getElementById('orderRows')) renderOrdersTable();
+    if(document.getElementById('supplierOrderRows')) renderSupplierOrdersTable();
+    updateOpenItemsBadge();
+  };
+  ['buyer_business_id','supplier_business_id'].forEach(col=>{
+    const ch = sb.channel('po-changes-'+col+'-'+myBusiness.id)
+      .on('postgres_changes', {event:'*', schema:'public', table:'purchase_orders', filter:`${col}=eq.${myBusiness.id}`}, onChange)
+      .subscribe();
+    poRealtimeChannels.push(ch);
+  });
 }
 
 async function handleSignIn(){
@@ -2467,6 +2580,8 @@ async function handleSignIn(){
   if(error){ if(errEl) errEl.textContent = error.message; return; }
   const ok = await loadMyBusinessContext();
   if(!ok){ if(errEl) errEl.textContent = "Signed in, but couldn't find your business account. Contact support."; return; }
+  await loadRealPurchaseOrders();
+  subscribeToPurchaseOrders();
   applyRealAccountUI();
   navigate('dashboard');
 }
@@ -2494,6 +2609,8 @@ async function handleSignUp(businessType){
   }
   const ok = await loadMyBusinessContext();
   if(!ok){ if(errEl) errEl.textContent = "Account created, but couldn't load your business yet. Try signing in."; return; }
+  await loadRealPurchaseOrders();
+  subscribeToPurchaseOrders();
   applyRealAccountUI();
   navigate('dashboard');
 }
@@ -2927,6 +3044,8 @@ function closeUserMenu(){
 async function logOut(){
   if(!confirm('Log out of Nifti?')) return;
   await sb.auth.signOut();
+  poRealtimeChannels.forEach(ch => sb.removeChannel(ch));
+  poRealtimeChannels = [];
   myBusiness = null; myTeamMember = null;
   navigate('index');
 }
@@ -4146,8 +4265,8 @@ function autoDraftReorderIfNeeded(item){
   const unitPrice = agreed ? agreed.price : 0;
   const poNumber = issuePoNumber();
   const newPO = {
-    id:'po'+(poIdCounter+100), poNumber,
-    buyerId:ME_BUYER, buyerName:'Dela Cruz Hardware', supplierId:supplierEntry.id, supplierName:supplierEntry.name,
+    id:newPoId(), poNumber,
+    buyerId:ME_BUYER, buyerName: myBusiness ? myBusiness.name : 'Dela Cruz Hardware', supplierId:supplierEntry.id, supplierName:supplierEntry.name,
     type:'local', status:'draft', taxRate:0.12,
     lineItems:[{product:item.name, qty:suggestedQty, unitPrice}],
     createdDate:APP_TODAY, requestedDeliveryDate:'', deliveryAddress:'Dela Cruz Hardware, Marikina City', notes:'Auto-drafted — '+item.name+' hit its restock level.',
@@ -5310,8 +5429,11 @@ function updateMessagesBadge(){
    makes the buyer→supplier sync real instead of simulated separately
    on each page.
    ============================================================ */
-const ME_BUYER = 'me_buyer';       // the persona when Viewing as: Buyer  (Dela Cruz Hardware)
-const ME_SUPPLIER = 'metro';       // the persona when Viewing as: Supplier (Metro Steel Co.)
+let ME_BUYER = 'me_buyer';       // the persona when Viewing as: Buyer  (Dela Cruz Hardware)
+let ME_SUPPLIER = 'metro';       // the persona when Viewing as: Supplier (Metro Steel Co.)
+// Real signed-in account: pointed at the actual business's uuid in loadMyBusinessContext().
+// Demo/unauthenticated sessions never call that, so these keep the string personas above,
+// unchanged, exactly as before real auth existed.
 
 // ---- BIR business registration profile ----
 // Nifti does not verify any of this — it's exactly what the business itself enters, used only
@@ -5464,7 +5586,7 @@ function readImageFileCompressed(file, callback, maxDimension, quality){
   };
   reader.readAsDataURL(file);
 }
-function poLogHistory(po, actor, action){ po.history.push({date:APP_TODAY, time:'Just now', actor, action, _pendingSync: isOffline}); if(isOffline) po._pendingSync = true; }
+function poLogHistory(po, actor, action){ po.history.push({date:APP_TODAY, time:'Just now', actor, action, _pendingSync: isOffline}); if(isOffline) po._pendingSync = true; syncPoToSupabase(po); }
 
 const purchaseOrders = [
   // ---- Buyer-only (visible only from Dela Cruz Hardware's Orders & Freight) ----
@@ -9693,8 +9815,8 @@ function saveCreatePO(sendNow){
   } else {
     const poNumber = issuePoNumber(); // server-issued — see issuePoNumber() above
     const newPO = {
-      id:'po'+(poIdCounter+100), poNumber,
-      buyerId:ME_BUYER, buyerName:'Dela Cruz Hardware', supplierId, supplierName:supplier.name,
+      id:newPoId(), poNumber,
+      buyerId:ME_BUYER, buyerName: myBusiness ? myBusiness.name : 'Dela Cruz Hardware', supplierId, supplierName:supplier.name,
       type, status:'draft', taxRate:0.12,
       lineItems:JSON.parse(JSON.stringify(createPOLineItems)),
       createdDate:'2026-08-26', requestedDeliveryDate:date, deliveryAddress:address, notes,
@@ -9721,8 +9843,8 @@ function createDraftPOObject({supplierId, lineItems, type, notes, requestedDeliv
   if(!supplier) return null;
   const poNumber = issuePoNumber();
   const newPO = {
-    id:'po'+(poIdCounter+100), poNumber,
-    buyerId:ME_BUYER, buyerName:'Dela Cruz Hardware', supplierId, supplierName:supplier.name,
+    id:newPoId(), poNumber,
+    buyerId:ME_BUYER, buyerName: myBusiness ? myBusiness.name : 'Dela Cruz Hardware', supplierId, supplierName:supplier.name,
     type: type || 'local', status:'draft', taxRate:0.12,
     lineItems: JSON.parse(JSON.stringify(lineItems)),
     createdDate: APP_TODAY, requestedDeliveryDate: requestedDeliveryDate || '',
@@ -17695,6 +17817,8 @@ async function bootNifti(){
   if(session){
     const ok = await loadMyBusinessContext();
     if(ok){
+      await loadRealPurchaseOrders();
+      subscribeToPurchaseOrders();
       applyRealAccountUI();
       navigate('dashboard');
     }
