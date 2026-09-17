@@ -1225,7 +1225,7 @@
     <div id="signinView">
       <h1 class="form-title">Welcome back</h1>
       <p class="form-sub">Sign in to manage your orders and suppliers.</p>
-      <div class="field"><label>Email</label><input type="email" placeholder="you@business.com"></div>
+      <div class="field"><label>Email</label><input id="signinEmail" type="email" placeholder="you@business.com"></div>
       <div class="field">
         <label>Password</label>
         <div class="pw-wrap">
@@ -1235,7 +1235,8 @@
           </button>
         </div>
       </div>
-      <button class="btn-submit" onclick="navigate('dashboard')">Sign in</button>
+      <div id="signinError" style="font-size:14px;color:var(--danger);font-weight:600;margin-bottom:10px;"></div>
+      <button class="btn-submit" onclick="handleSignIn()">Sign in</button>
       <div class="oauth-divider">or</div>
       <button class="oauth-btn" onclick="return false;">
         <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47a5.54 5.54 0 0 1-2.4 3.63v3h3.87c2.27-2.09 3.55-5.17 3.55-8.87z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.87-3a7.4 7.4 0 0 1-11-3.9H1.08v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.04 14.19a7.2 7.2 0 0 1 0-4.38v-3.1H1.08a12 12 0 0 0 0 10.58z"/><path fill="#EA4335" d="M12 4.75c1.76 0 3.35.6 4.6 1.8l3.42-3.42A11.8 11.8 0 0 0 12 0 12 12 0 0 0 1.08 6.71l3.96 3.1A7.16 7.16 0 0 1 12 4.75z"/></svg>
@@ -1270,7 +1271,7 @@
         <div class="field"><label>Business name</label><input type="text" id="buyerSignupBizName" list="bizNameAutocomplete" placeholder="Start typing…" oninput="onBizNameAutocomplete(this.value)"><datalist id="bizNameAutocomplete"></datalist>
           <div id="bizAutofillNote" class="hidden" style="font-size:15px;color:var(--green);font-weight:700;margin-top:4px;">✓ Found it — address and category pre-filled from public business records.</div>
         </div>
-        <div class="field"><label>Email</label><input type="email" placeholder="you@business.com"></div>
+        <div class="field"><label>Email</label><input id="buyerSignupEmail" type="email" placeholder="you@business.com"></div>
         <div class="field">
           <label>Password</label>
           <div class="pw-wrap">
@@ -1280,7 +1281,8 @@
             </button>
           </div>
         </div>
-        <button class="btn-submit" onclick="navigate('dashboard')">Create account</button>
+        <div id="buyerSignupError" style="font-size:14px;color:var(--danger);font-weight:600;margin-bottom:10px;"></div>
+        <button class="btn-submit" onclick="handleSignUp('buyer')">Create account</button>
         <div class="oauth-divider">or</div>
         <button class="oauth-btn" onclick="return false;">
           <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47a5.54 5.54 0 0 1-2.4 3.63v3h3.87c2.27-2.09 3.55-5.17 3.55-8.87z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.87-3a7.4 7.4 0 0 1-11-3.9H1.08v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.04 14.19a7.2 7.2 0 0 1 0-4.38v-3.1H1.08a12 12 0 0 0 0 10.58z"/><path fill="#EA4335" d="M12 4.75c1.76 0 3.35.6 4.6 1.8l3.42-3.42A11.8 11.8 0 0 0 12 0 12 12 0 0 0 1.08 6.71l3.96 3.1A7.16 7.16 0 0 1 12 4.75z"/></svg>
@@ -1293,17 +1295,23 @@
       </div>
 
       <div id="supplierSignupFields" class="hidden">
-        <!-- Section 6 #2 — supplier signup uses phone + OTP only. No password field exists
-             anywhere in this flow, on any plan tier. -->
-        <div class="field"><label>Business name</label><input type="text" placeholder="e.g. Metro Steel Co."></div>
-        <div class="field"><label>Phone number</label><input id="supplierSignupPhone" type="text" placeholder="0917 123 4567"></div>
-        <div id="supplierOtpStep1">
-          <button class="btn-submit" onclick="sendSupplierOtp()">Send verification code →</button>
+        <!-- Real backend uses email/password for both account types (see handleSignUp) — the
+             original phone+OTP-only design for suppliers needs Supabase Phone Auth wired to an
+             SMS provider (Twilio/MessageBird), which costs per message and needs its own
+             account, so it's deferred rather than half-built here. -->
+        <div class="field"><label>Business name</label><input type="text" id="supplierSignupBizName" placeholder="e.g. Metro Steel Co."></div>
+        <div class="field"><label>Email</label><input id="supplierSignupEmail" type="email" placeholder="you@business.com"></div>
+        <div class="field">
+          <label>Password</label>
+          <div class="pw-wrap">
+            <input id="pwSignupSupplier" type="password" placeholder="Create a password">
+            <button type="button" class="pw-toggle" onclick="togglePw('pwSignupSupplier', this)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
         </div>
-        <div id="supplierOtpStep2" class="hidden">
-          <div class="field"><label>Enter the 6-digit code sent to your phone</label><input id="supplierOtpCode" type="text" maxlength="6" placeholder="123456"></div>
-          <button class="btn-submit" onclick="verifySupplierOtp()">Verify &amp; create account →</button>
-        </div>
+        <div id="supplierSignupError" style="font-size:14px;color:var(--danger);font-weight:600;margin-bottom:10px;"></div>
+        <button class="btn-submit" onclick="handleSignUp('supplier')">Create account</button>
         <!-- Section 6 #7 — no payment method field anywhere in supplier signup or account setup, on any plan tier. -->
         <div style="font-size:15px;color:var(--ink);opacity:.7;margin-top:10px;">No payment details are ever requested to join as a supplier.</div>
       </div>
@@ -2421,7 +2429,90 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+/* ============ SUPABASE AUTH ============ */
+const NIFTI_SUPABASE_URL = 'https://ctryvcloavfpecbrbzxy.supabase.co';
+const NIFTI_SUPABASE_KEY = 'sb_publishable_oWW-IMSOeNNFiQDjUnpWdQ_hlezb7wS';
+const sb = window.supabase.createClient(NIFTI_SUPABASE_URL, NIFTI_SUPABASE_KEY);
+let nifitAuthSession = null; // the live Supabase Auth session, once signed in
+let myBusiness = null;       // { id, name, type } for the signed-in account's business
+let myTeamMember = null;     // this person's own team_members row (id, name, roles, ...)
+
+// Loads the business + this person's team_members row for the current auth session, and
+// points the existing app state (currentAppRole/currentUserId/etc.) at real data instead of
+// the hardcoded Dela Cruz Hardware / Metro Steel Co. demo personas.
+async function loadMyBusinessContext(){
+  const { data: { user } } = await sb.auth.getUser();
+  if(!user) return false;
+  const { data: tm, error } = await sb.from('team_members')
+    .select('*, businesses(*)')
+    .eq('auth_user_id', user.id)
+    .single();
+  if(error || !tm) return false;
+  myTeamMember = tm;
+  myBusiness = tm.businesses;
+  currentAppRole = myBusiness.type; // 'buyer' or 'supplier' — fixed by the account, not togglable
+  currentUserId = tm.id;
+  return true;
+}
+
+async function handleSignIn(){
+  const email = document.getElementById('signinEmail').value.trim();
+  const password = document.getElementById('pwSignin').value;
+  const errEl = document.getElementById('signinError');
+  if(errEl) errEl.textContent = '';
+  if(!email || !password){ if(errEl) errEl.textContent = 'Enter your email and password.'; return; }
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ if(errEl) errEl.textContent = error.message; return; }
+  const ok = await loadMyBusinessContext();
+  if(!ok){ if(errEl) errEl.textContent = "Signed in, but couldn't find your business account. Contact support."; return; }
+  applyRealAccountUI();
+  navigate('dashboard');
+}
+
+async function handleSignUp(businessType){
+  const prefix = businessType === 'supplier' ? 'supplier' : 'buyer';
+  const bizName = document.getElementById(prefix+'SignupBizName').value.trim();
+  const email = document.getElementById(prefix+'SignupEmail').value.trim();
+  const password = document.getElementById(prefix==='buyer' ? 'pwSignup' : 'pwSignupSupplier').value;
+  const errEl = document.getElementById(prefix+'SignupError');
+  if(errEl) errEl.textContent = '';
+  if(!bizName || !email || !password){ if(errEl) errEl.textContent = 'Fill in business name, email, and password.'; return; }
+  if(password.length < 6){ if(errEl) errEl.textContent = 'Password must be at least 6 characters.'; return; }
+  const { data, error } = await sb.auth.signUp({
+    email, password,
+    options: { data: { business_name: bizName, business_type: businessType, full_name: bizName } }
+  });
+  if(error){ if(errEl) errEl.textContent = error.message; return; }
+  if(!data.session){
+    // Email confirmation is on by default for a new Supabase project — no session yet until
+    // the link in that email is clicked. Toggle it off in Dashboard > Authentication >
+    // Providers > Email > "Confirm email" if you want signup to log straight in during testing.
+    if(errEl){ errEl.style.color = 'var(--green)'; errEl.textContent = 'Account created — check your email to confirm, then sign in.'; }
+    return;
+  }
+  const ok = await loadMyBusinessContext();
+  if(!ok){ if(errEl) errEl.textContent = "Account created, but couldn't load your business yet. Try signing in."; return; }
+  applyRealAccountUI();
+  navigate('dashboard');
+}
+
+// Swaps the demo chip name / role toggle for what a real signed-in account should show — a
+// real business is fixed as buyer or supplier, so the Buyer/Supplier switcher (a demo device
+// for viewing both sides at once) has nothing to toggle to and is hidden.
+function applyRealAccountUI(){
+  const roleSwitch = document.getElementById('roleBtnBuyer')?.closest('.role-switcher');
+  if(roleSwitch) roleSwitch.classList.add('hidden');
+  document.querySelectorAll('.user-chip').forEach(chip=>{
+    chip.childNodes.forEach(node=>{
+      if(node.nodeType===3 && node.textContent.trim().length) node.textContent = myBusiness.name;
+    });
+    const av = chip.querySelector('.avatar');
+    if(av) av.textContent = myBusiness.name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+  });
+}
+
 /* ============ NAVIGATION ============ */
 const marketingPages = ['index','features','pricing','privacy','terms'];
 // Section 5 #4 — offline action queue. Message sends, PO creation/sending, and milestone
@@ -2833,8 +2924,10 @@ function toggleUserMenu(e){
 function closeUserMenu(){
   document.getElementById('userMenuDropdown').classList.add('hidden');
 }
-function logOut(){
+async function logOut(){
   if(!confirm('Log out of Nifti?')) return;
+  await sb.auth.signOut();
+  myBusiness = null; myTeamMember = null;
   navigate('index');
 }
 function openHelpCenter(){
@@ -17591,7 +17684,23 @@ async function initNiftiApp(){
     noteNiftiStorageUnavailableOnce();
   }
 }
-initNiftiApp();
+// Boots the existing demo-data machinery first (still what every page reads from — see the
+// gap noted in loadMyBusinessContext's caller below), then checks for a real Supabase Auth
+// session. A real session jumps straight to the dashboard under the signed-in account's own
+// identity; with no session, the page falls back to its default state (marketing homepage,
+// login reachable from there) exactly as before this file had real auth.
+async function bootNifti(){
+  await initNiftiApp();
+  const { data: { session } } = await sb.auth.getSession();
+  if(session){
+    const ok = await loadMyBusinessContext();
+    if(ok){
+      applyRealAccountUI();
+      navigate('dashboard');
+    }
+  }
+}
+bootNifti();
 </script>
 </body>
 </html>
