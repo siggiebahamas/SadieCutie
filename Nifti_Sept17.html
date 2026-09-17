@@ -2497,6 +2497,9 @@ async function mapPoRowToJs(row){
     shipping: row.shipping, customs: row.customs, invoice: row.invoice, counter: row.counter,
     deliveryConfirmation: row.delivery_confirmation, atRisk: row.at_risk, riskNote: row.risk_note || '',
     history: row.history || [],
+    rma: row.rma, assignment: row.assignment, depositPayments: row.deposit_payments,
+    codPayment: row.cod_payment, salesInvoiceRecord: row.sales_invoice_record, amendments: row.amendments,
+    backorderPoId: row.backorder_po_id, replacesPoId: row.replaces_po_id, backorderFromPoId: row.backorder_from_po_id,
   };
 }
 
@@ -2513,6 +2516,9 @@ function mapPoJsToRow(po){
     counter: po.counter || null, delivery_confirmation: po.deliveryConfirmation || null,
     at_risk: !!po.atRisk, risk_note: po.riskNote || null,
     history: po.history || [],
+    rma: po.rma || null, assignment: po.assignment || null, deposit_payments: po.depositPayments || null,
+    cod_payment: po.codPayment || null, sales_invoice_record: po.salesInvoiceRecord || null, amendments: po.amendments || null,
+    backorder_po_id: po.backorderPoId || null, replaces_po_id: po.replacesPoId || null, backorder_from_po_id: po.backorderFromPoId || null,
   };
 }
 
@@ -8185,7 +8191,7 @@ function submitRmaCreditNote(id){
 }
 function submitRmaReplacement(id){
   const po = getPO(id);
-  const newId = 'po'+(poIdCounter+100);
+  const newId = newPoId();
   poIdCounter++;
   const poNumber = issuePoNumber();
   const replacementPO = {
@@ -8535,7 +8541,7 @@ function generateNextRecurringDraft(id){
   const po = getPO(id);
   const poNumber = issuePoNumber();
   const newPO = {
-    id:'po'+(poIdCounter+100), poNumber,
+    id:newPoId(), poNumber,
     buyerId: po.buyerId, buyerName: po.buyerName, supplierId: po.supplierId, supplierName: po.supplierName,
     type: po.type, status:'draft', taxRate: po.taxRate,
     lineItems: JSON.parse(JSON.stringify(po.lineItems)),
@@ -10038,7 +10044,7 @@ function submitPartialConfirm(id){
 
   // The shortfall becomes its own real order — same buyer, same supplier, same agreed prices —
   // sitting as a backorder until the supplier is ready to actually confirm and ship it.
-  const backorderId = 'po'+(poIdCounter+100);
+  const backorderId = newPoId();
   poIdCounter++;
   const backorderNumber = issuePoNumber();
   const backorderPO = {
@@ -11293,8 +11299,8 @@ function acceptRfqQuote(id){
   const supplier = suppliersData.find(s=>s.id===rfq.supplierId);
   poIdCounter++;
   const newPO = {
-    id:'po'+(poIdCounter+200), poNumber:'PO-2026-0'+(880+poIdCounter),
-    buyerId:ME_BUYER, buyerName:'Dela Cruz Hardware', supplierId:rfq.supplierId, supplierName:supplier.name,
+    id:newPoId(), poNumber:'PO-2026-0'+(880+poIdCounter),
+    buyerId:ME_BUYER, buyerName: myBusiness ? myBusiness.name : 'Dela Cruz Hardware', supplierId:rfq.supplierId, supplierName:supplier.name,
     type:'local', status:'draft', currency:'PHP', taxRate:0.12,
     lineItems:rfq.items.map(i=>({product:i.product, qty:i.qty, unitPrice:rfq.quote.unitPrice})),
     createdDate:'2026-08-26', requestedDeliveryDate:rfq.neededByDate, deliveryAddress:'Dela Cruz Hardware, Marikina City', notes:'Created from accepted quote '+rfq.rfqNumber,
