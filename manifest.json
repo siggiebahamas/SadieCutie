@@ -1,0 +1,14 @@
+{
+  "name": "Nifti",
+  "short_name": "Nifti",
+  "description": "Private procurement platform for Philippine businesses — orders, inventory, and payments with the suppliers you already trust.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FAF7F2",
+  "theme_color": "#1B6B40",
+  "icons": [
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

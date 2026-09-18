@@ -27,11 +27,14 @@ jobs:
 
       # Nifti_Sept17.html stays the one source file in the repo; this just serves it as
       # index.html so the site works at the plain root URL, with zero risk of a second
-      # copy drifting out of sync.
+      # copy drifting out of sync. manifest.json/sw.js/icon-512.png are referenced by
+      # index.html itself (PWA manifest, service worker, favicon) and must sit alongside it
+      # at the site root or those requests 404.
       - name: Prepare site directory
         run: |
           mkdir -p _site
           cp Nifti_Sept17.html _site/index.html
+          cp manifest.json sw.js icon-512.png _site/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
