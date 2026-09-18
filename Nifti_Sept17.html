@@ -705,6 +705,69 @@
     #docPreviewModal > div{max-height:none !important;width:100% !important;box-shadow:none !important;}
     #docPreviewNoPrint{display:none !important;}
   }
+
+  /* ============ HOMEPAGE LEGIBILITY PASS — scoped to #view-index only ============ */
+  #view-index .nav-links{font-size:20px;}
+  #view-index .login-link{font-size:17px;}
+  #view-index .nav-cta .btn{font-size:17px;}
+  #view-index .pill{font-size:16.5px;}
+  #view-index h1.headline{font-size:50px;}
+  #view-index .sub{font-size:21.5px;}
+  #view-index .btn-hero-primary,#view-index .btn-hero-outline{font-size:18px;}
+  #view-index .hero-note{font-size:18.5px;}
+  #view-index .stat h3{font-size:27px;}
+  #view-index .stat p{font-size:18.5px;}
+  #view-index h2.section-title{font-size:35px;}
+  #view-index .sec-sub{font-size:19.5px;}
+  #view-index .step-label{font-size:16px;}
+  #view-index .step-card h3{font-size:22px;white-space:normal;}
+  #view-index .step-card p{font-size:18px;}
+  #view-index .check-list li{font-size:17.5px;}
+  #view-index .po-id{font-size:17px;}
+  #view-index .po-name{font-size:16.5px;}
+  #view-index .late-pill{font-size:16px;}
+  #view-index .m-label{font-size:18.5px;}
+  #view-index .m-meta{font-size:16.5px;}
+  #view-index .feat-card h3{font-size:20.5px;white-space:normal;}
+  #view-index .feat-card p{font-size:17.5px;}
+  #view-index .cta-band h2{font-size:31px;}
+  #view-index .cta-band p{font-size:17.5px;}
+  #view-index .foot-brand{font-size:16.5px;}
+  #view-index .foot-links{font-size:16.5px;}
+  @media (max-width:980px){
+    #view-index h1.headline{font-size:36px;}
+  }
+
+  /* ============ HOMEPAGE VISUAL REVISION — picture-proof panels for Steps + feature grid ============ */
+  .hiw-shot{background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:16px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:8px;margin-bottom:16px;}
+  .hiw-shot.step{height:140px;}
+  .hiw-shot.feat{height:100px;}
+  .hiw-chat{align-self:flex-start;background:var(--green);color:#fff;border-radius:14px 14px 14px 3px;padding:9px 13px;font-size:13px;max-width:90%;line-height:1.35;}
+  .hiw-chat.in{background:var(--surface);border:1px solid var(--border);color:var(--ink);border-radius:14px 14px 3px 14px;align-self:flex-end;}
+  .hiw-chat-meta{font-size:11px;color:var(--ink);opacity:.5;}
+  .hiw-check-row{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;color:var(--ink);}
+  .hiw-check-row svg{width:16px;height:16px;flex-shrink:0;color:var(--green);}
+  .hiw-pill-sm{align-self:flex-start;font-size:11.5px;font-weight:700;color:var(--green);background:var(--green-soft);padding:4px 10px;border-radius:100px;}
+  .hiw-po-row{display:flex;justify-content:space-between;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 12px;}
+  .hiw-po-row .id{font-family:var(--font-m);font-size:12.5px;font-weight:600;color:var(--ink);}
+  .hiw-po-row .price{font-family:var(--font-h);font-size:20px;font-weight:800;color:var(--green);}
+  .hiw-visible-note{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink);opacity:.6;}
+  .hiw-visible-note svg{width:13px;height:13px;flex-shrink:0;}
+  .hiw-pipeline{display:flex;align-items:center;}
+  .hiw-pipeline .dot{width:20px;height:20px;border-radius:100px;background:var(--green);flex-shrink:0;}
+  .hiw-pipeline .line{flex-grow:1;height:3px;background:var(--green);}
+  .hiw-pipeline-labels{display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;color:var(--ink);opacity:.5;margin-top:8px;}
+  .hiw-bignum{font-family:var(--font-h);font-size:32px;font-weight:800;color:var(--green);line-height:1;}
+  .hiw-bignum-cap{font-size:12.5px;color:var(--ink);opacity:.55;margin-top:4px;}
+  .hiw-tag-row{display:flex;gap:8px;flex-wrap:wrap;}
+  .hiw-tag{font-size:11px;font-weight:700;background:var(--surface);border:1px solid var(--border);padding:5px 10px;border-radius:100px;color:var(--ink);}
+  .hiw-bar{height:10px;background:var(--surface);border:1px solid var(--border);border-radius:100px;overflow:hidden;}
+  .hiw-bar-fill{height:100%;background:var(--green);}
+  .hiw-center{align-items:center;text-align:center;}
+  .hiw-center svg{width:28px;height:28px;color:var(--green);margin:0 auto;}
+  .hiw-center-cap{font-size:12.5px;font-weight:600;color:var(--ink);}
+  #view-index .step-card .icon-title{margin-bottom:6px;}
+  #view-index .step-card h3,#view-index .feat-card h3{margin-bottom:6px;}
 </style>
 </head>
 <body>
@@ -771,22 +834,32 @@
     </div>
     <div class="step-grid">
       <div class="step-card">
+        <div class="hiw-shot step">
+          <div class="hiw-chat">Hardware Co. invited you to connect on Nifti →</div>
+          <div class="hiw-chat-meta">Sent via Viber</div>
+        </div>
         <div class="icon-title">
-          <div class="step-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></div>
           <div><div class="step-label">Step 1</div><h3>Buyer sends an invite</h3></div>
         </div>
         <p>Add their name and number — Nifti drafts the message, sent on Viber, WhatsApp, or SMS.</p>
       </div>
       <div class="step-card">
+        <div class="hiw-shot step">
+          <div class="hiw-check-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>Business info</div>
+          <div class="hiw-check-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>Products &amp; pricing</div>
+          <span class="hiw-pill-sm">₱0 fees · no hoops</span>
+        </div>
         <div class="icon-title">
-          <div class="step-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
           <div><div class="step-label">Step 2</div><h3>Supplier joins in 5 minutes</h3></div>
         </div>
         <p>Confirm business info, add products and pricing, done — no verification hoops, no fees, ever.</p>
       </div>
       <div class="step-card">
+        <div class="hiw-shot step">
+          <div class="hiw-po-row"><span class="id">PO-2026-0841</span><span class="price">₱64/pc</span></div>
+          <div class="hiw-visible-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Visible to this supplier only</div>
+        </div>
         <div class="icon-title">
-          <div class="step-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c.9 4 2.1 5.2 6 6-3.9.8-5.1 2-6 6-.9-4-2.1-5.2-6-6 3.9-.8 5.1-2 6-6z"/></svg></div>
           <div><div class="step-label">Step 3</div><h3>Orders move off chat</h3></div>
         </div>
         <p>Pricing is visible only to this one relationship. One side places the order, the other confirms, and both see the same timeline from then on.</p>
@@ -824,12 +897,56 @@
   <div class="wrap">
     <div class="sec-head"><h2 class="section-title">Everything both sides currently keep in their head — or on a sticky note.</h2></div>
     <div class="feat-grid">
-      <div class="feat-card"><div class="icon-title"><div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></div><h3>Local by default</h3></div><p>Placed → Prepared → Delivered → Paid, with proof-of-delivery photos. Built for a truck across town.</p></div>
-      <div class="feat-card"><div class="icon-title"><div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg></div><h3>Freight, on demand</h3></div><p>Switch one order to the 12-step import track — loading, customs, port release, all tracked. Group 20 SKUs per container.</p></div>
-      <div class="feat-card"><div class="icon-title"><div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></div><h3>Get paid your way</h3></div><p>GCash, Maya, bank transfer, cash, and checks with real clearing status — plus BIR-ready Sales Invoices and VAT tracking, not just a spreadsheet.</p></div>
-      <div class="feat-card"><div class="icon-title"><div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-6h6v6"/></svg></div><h3>Stock alerts that draft the reorder</h3></div><p>Multi-warehouse levels, lot/expiry tracking, and restock levels based on real lead times — plus a real draft PO waiting for you when something's running low.</p></div>
-      <div class="feat-card"><div class="icon-title"><div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div><h3>One thread per chat</h3></div><p>Chat lives beside the order, with photos for damage or delivery proof. No more digging through old threads.</p></div>
-      <div class="feat-card"><div class="icon-title"><div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div><h3>Private by default</h3></div><p>No public catalog, no leaderboard. Neither side is ever visible to a counterparty they didn't agree to work with.</p></div>
+      <div class="feat-card">
+        <div class="hiw-shot feat">
+          <div class="hiw-pipeline">
+            <div class="dot"></div><div class="line"></div><div class="dot"></div><div class="line"></div><div class="dot"></div><div class="line"></div><div class="dot"></div>
+          </div>
+          <div class="hiw-pipeline-labels"><span>Placed</span><span>Prepared</span><span>Delivered</span><span>Paid</span></div>
+        </div>
+        <h3>Local by default</h3>
+        <p>Placed → Prepared → Delivered → Paid, with proof-of-delivery photos. Built for a truck across town.</p>
+      </div>
+      <div class="feat-card">
+        <div class="hiw-shot feat">
+          <div class="hiw-bignum">12 steps</div>
+          <div class="hiw-bignum-cap">Loading → Customs → Port release</div>
+        </div>
+        <h3>Freight, on demand</h3>
+        <p>Switch one order to the 12-step import track — loading, customs, port release, all tracked. Group 20 SKUs per container.</p>
+      </div>
+      <div class="feat-card">
+        <div class="hiw-shot feat">
+          <div class="hiw-tag-row"><span class="hiw-tag">GCash</span><span class="hiw-tag">Maya</span><span class="hiw-tag">Bank</span></div>
+          <span class="hiw-pill-sm">✓ Cleared — BIR-ready</span>
+        </div>
+        <h3>Get paid your way</h3>
+        <p>GCash, Maya, bank transfer, cash, and checks with real clearing status — plus BIR-ready Sales Invoices and VAT tracking, not just a spreadsheet.</p>
+      </div>
+      <div class="feat-card">
+        <div class="hiw-shot feat">
+          <div class="hiw-bar"><div class="hiw-bar-fill" style="width:22%;"></div></div>
+          <span class="hiw-pill-sm">Draft ready — review &amp; send</span>
+        </div>
+        <h3>Stock alerts that draft the reorder</h3>
+        <p>Multi-warehouse levels, lot/expiry tracking, and restock levels based on real lead times — plus a real draft PO waiting for you when something's running low.</p>
+      </div>
+      <div class="feat-card">
+        <div class="hiw-shot feat">
+          <div class="hiw-chat" style="font-size:11.5px;padding:6px 10px;">Delivered 2 boxes short 📷</div>
+          <div class="hiw-chat in" style="font-size:11.5px;padding:6px 10px;">Noted — replacement on the way</div>
+        </div>
+        <h3>One thread per chat</h3>
+        <p>Chat lives beside the order, with photos for damage or delivery proof. No more digging through old threads.</p>
+      </div>
+      <div class="feat-card">
+        <div class="hiw-shot feat hiw-center">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <div class="hiw-center-cap">Visible to you two, no one else</div>
+        </div>
+        <h3>Private by default</h3>
+        <p>No public catalog, no leaderboard. Neither side is ever visible to a counterparty they didn't agree to work with.</p>
+      </div>
     </div>
   </div>
 </section>
