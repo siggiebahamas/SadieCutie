@@ -3023,6 +3023,31 @@ let nifitAuthSession = null; // the live Supabase Auth session, once signed in
 let myBusiness = null;       // { id, name, type } for the signed-in account's business
 let myTeamMember = null;     // this person's own team_members row (id, name, roles, ...)
 
+// Real error monitoring: uncaught exceptions and unhandled promise rejections get written to
+// client_error_log (insert-only, unreadable via the app API) so bugs in beta actually surface
+// somewhere instead of only existing in a colleague's console they'll never think to check.
+// Capped per session so a loop that throws repeatedly can't flood the table.
+let clientErrorLogCount = 0;
+function logClientError(message, stack){
+  if(clientErrorLogCount >= 20) return;
+  clientErrorLogCount++;
+  sb.from('client_error_log').insert({
+    business_id: myBusiness ? myBusiness.id : null,
+    user_email: nifitAuthSession && nifitAuthSession.user ? nifitAuthSession.user.email : null,
+    message: String(message).slice(0, 2000),
+    stack: stack ? String(stack).slice(0, 4000) : null,
+    url: location.href,
+    user_agent: navigator.userAgent,
+  }).then(()=>{}, ()=>{}); // best-effort — never let logging itself throw
+}
+window.addEventListener('error', (event)=>{
+  logClientError(event.message || 'Uncaught error', event.error && event.error.stack);
+});
+window.addEventListener('unhandledrejection', (event)=>{
+  const reason = event.reason;
+  logClientError(reason && reason.message ? reason.message : String(reason), reason && reason.stack);
+});
+
 // Loads the business + this person's team_members row for the current auth session, and
 // points the existing app state (currentAppRole/currentUserId/etc.) at real data instead of
 // the hardcoded Dela Cruz Hardware / Metro Steel Co. demo personas.
@@ -17418,16 +17443,29 @@ function renderSupportContactForm(prefill){
     <div id="supportMessageConfirm"></div>
   `;
 }
-function submitSupportMessage(){
+async function submitSupportMessage(){
   const category = document.getElementById('supportCategory').value;
   const message = document.getElementById('supportMessage').value.trim();
   if(!message){ markFieldInvalid('supportMessage', 'Let us know what\'s going on.'); return; }
   const me = getActiveTeamMembers().find(m=>m.id===currentUserId);
-  supportMessages.push({id:'sup'+Date.now(), category, message, date:APP_TODAY, from: me?me.name:'Someone', business: currentAppRole==='buyer'?'Dela Cruz Hardware':'Metro Steel Co.'});
+  const confirmEl = document.getElementById('supportMessageConfirm');
+  if(!myBusiness){
+    supportMessages.push({id:'sup'+Date.now(), category, message, date:APP_TODAY, from: me?me.name:'Someone', business: currentAppRole==='buyer'?'Dela Cruz Hardware':'Metro Steel Co.'});
+    document.getElementById('supportCategory').value = 'dispute';
+    document.getElementById('supportMessage').value = '';
+    confirmEl.innerHTML = `<div style="margin-top:8px;padding:10px 12px;background:var(--green-soft);border:1.5px solid var(--green);border-radius:8px;font-size:14.5px;">✓ Sent. We'll get back to you directly — usually within a day.</div>`;
+    scheduleNiftiSave();
+    return;
+  }
+  confirmEl.innerHTML = `<div style="margin-top:8px;padding:10px 12px;background:var(--bg);border:1.5px solid var(--border);border-radius:8px;font-size:14.5px;">Sending…</div>`;
+  const { error } = await sb.from('support_messages').insert({ business_id: myBusiness.id, category, message, from_name: me?me.name:null });
+  if(error){
+    confirmEl.innerHTML = `<div style="margin-top:8px;padding:10px 12px;background:var(--danger-soft);border:1.5px solid var(--danger);border-radius:8px;font-size:14.5px;">Couldn't send — try again, or email support@nifti.ph directly.</div>`;
+    return;
+  }
   document.getElementById('supportCategory').value = 'dispute';
   document.getElementById('supportMessage').value = '';
-  document.getElementById('supportMessageConfirm').innerHTML = `<div style="margin-top:8px;padding:10px 12px;background:var(--green-soft);border:1.5px solid var(--green);border-radius:8px;font-size:14.5px;">✓ Sent. We'll get back to you directly — usually within a day.</div>`;
-  scheduleNiftiSave();
+  confirmEl.innerHTML = `<div style="margin-top:8px;padding:10px 12px;background:var(--green-soft);border:1.5px solid var(--green);border-radius:8px;font-size:14.5px;">✓ Sent. We'll get back to you directly — usually within a day.</div>`;
 }
 // The real replacement for a multi-party "escalate" flow: a direct link straight to us, right
 // where a dispute lives, for when two people genuinely can't work something out themselves.
@@ -18015,23 +18053,11 @@ function promptInstallApp(){
    that piece, already built and deployed separately from this file.
 ============================================================================ */
 let chatNotificationsEnabled = false;
-// Fill this in once nifti-server is actually deployed (Render/Railway/Fly.io — see its
-// README). Left blank, real push subscription is skipped and only the Notifications API
-// (foreground/backgrounded-tab notifications) is used.
-const NIFTI_PUSH_SERVER_URL = '';
-// Must exactly match the server's VAPID_PUBLIC_KEY — the server generated this pair together;
-// swap both if you regenerate keys.
-const NIFTI_VAPID_PUBLIC_KEY = 'BPrL6sXL9wNKjzvEeRJFSPbOQHBzRJuozM26_SBr0ZpjGazhpPesDUXLwtQlGtr5awWq5AxGXXgcBhG2JqB7s_I';
-// Fill in once nifti-server is deployed with a real NIFTI_API_KEY (see its README). HONEST
-// CAVEAT, not a bug: anything in this file's source is visible to anyone via view-source — this
-// key stops casual/accidental abuse of /send, not a determined reader of this page's own code.
-// The real fix is a trusted backend calling /send server-to-server, once Nifti has one of its
-// own; until then, this is pilot-grade protection, not production-grade.
-const NIFTI_PUSH_API_KEY = '';
-// The real per-user targeting key — matches whichever of the two real identities in this
-// prototype is currently active, so a device subscribes as "the buyer" or "the supplier," not
-// as one anonymous blob. In a real multi-tenant deployment this would be a real account ID.
-function currentNiftiUserId(){ return currentAppRole === 'supplier' ? ME_SUPPLIER : ME_BUYER; }
+// Real Web Push, served by the push-subscribe / push-send Supabase Edge Functions (see
+// Section 5's PayMongo functions for the same pattern) instead of the external "nifti-server"
+// this used to point at, which was never actually deployed. Only meaningful for a real signed-in
+// account — demo mode has no real business_id row for a subscription to attach to.
+const NIFTI_VAPID_PUBLIC_KEY = 'BI-nsz29uQ5nj7gckSSJFfSn4WI33nbDJ84dvHWjkgkQRFH2LWIBNwqH6TXMIJNVUROgQuBqw1YYT8nyw-tGUL8';
 function urlBase64ToUint8Array(base64String){
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -18039,12 +18065,11 @@ function urlBase64ToUint8Array(base64String){
   return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
 }
 // The real subscribe flow: ask the browser's push service for a subscription (this is what
-// makes delivery possible even when this tab is fully closed), then hand that subscription,
-// tagged with the real current identity, to our own server. Fails quietly with a clear toast if
-// the server URL hasn't been configured yet — that's an expected state before deployment, not a bug.
+// makes delivery possible even when this tab is fully closed), then hand that subscription to
+// push-subscribe, which saves it against the signed-in account's own business_id.
 async function subscribeToRealPush(){
-  if(!NIFTI_PUSH_SERVER_URL){
-    showToast('Notifications are on for this tab. To also get them when the app is fully closed, deploy nifti-server and set NIFTI_PUSH_SERVER_URL.', 'success');
+  if(!myBusiness){
+    showToast('Notifications are on for this tab. Sign in to also get them when the app is fully closed.', 'success');
     return;
   }
   if(!('serviceWorker' in navigator) || !('PushManager' in window)){
@@ -18060,11 +18085,9 @@ async function subscribeToRealPush(){
         applicationServerKey: urlBase64ToUint8Array(NIFTI_VAPID_PUBLIC_KEY),
       });
     }
-    const res = await fetch(NIFTI_PUSH_SERVER_URL + '/subscribe', {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({userId: currentNiftiUserId(), subscription}),
-    });
-    if(res.ok){ showToast('Real background push is on — you\'ll get notified even with the app fully closed.', 'success'); }
-    else { showToast('Push server reachable but rejected the subscription — check its logs.', 'error'); }
+    const { data, error } = await sb.functions.invoke('push-subscribe', { body: { subscription: subscription.toJSON() } });
+    if(!error && data && data.ok){ showToast('Real background push is on — you\'ll get notified even with the app fully closed.', 'success'); }
+    else { showToast('Could not save your subscription — try again.', 'error'); }
   } catch(err){
     showToast('Could not set up background push: ' + err.message, 'error');
   }
@@ -18103,20 +18126,19 @@ function fireRealChatNotification(senderName, text){
     catch(e){ /* some contexts (non-HTTPS origins, some in-app mobile browsers) restrict this and fail silently — the in-app badge below still updates regardless */ }
   }
   pushNotification(`New message from ${senderName}`, 'var(--green)', {type:'page', page:'messages'}, 'chatMessage', PUSH_TEMPLATES.chatMessage({senderName, text}));
-  triggerRealServerPush(currentNiftiUserId(), `New message from ${senderName}`, text);
+  // myBusiness.id is the real recipient's business_id -- push-send needs a real uuid, which
+  // only exists for a signed-in account, not the demo's ME_BUYER/ME_SUPPLIER placeholder strings.
+  if(myBusiness) triggerRealServerPush(myBusiness.id, `New message from ${senderName}`, text);
 }
-// Calls the real, deployed nifti-server — the actual mechanism that reaches a fully closed app.
-// No-ops quietly if the server isn't configured yet (NIFTI_PUSH_SERVER_URL blank) — that's the
-// expected state before deployment, not an error worth interrupting the person over.
-async function triggerRealServerPush(userId, title, body){
-  if(!NIFTI_PUSH_SERVER_URL || !NIFTI_PUSH_API_KEY) return;
+// Calls the real push-send Edge Function -- the actual mechanism that reaches a fully closed
+// app. Note this only ever fires today from simulateThreadReply() below, the demo's "they
+// reply" button: real two-way chat isn't wired to Supabase yet (a separate, larger piece of
+// work), so there's no real message event to trigger this from in production yet either. The
+// send path itself is real and complete; it just has nothing real feeding it until that lands.
+async function triggerRealServerPush(businessId, title, body){
   try{
-    await fetch(NIFTI_PUSH_SERVER_URL + '/send', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json', 'x-api-key': NIFTI_PUSH_API_KEY},
-      body: JSON.stringify({userId, title, body, url: './Nifti_Sept_6_html.html#messages'}),
-    });
-  } catch(e){ /* server unreachable — the in-app notification already fired regardless */ }
+    await sb.functions.invoke('push-send', { body: { businessId, title, body } });
+  } catch(e){ /* push-send unreachable or not yet configured — the in-app notification already fired regardless */ }
 }
 // Same honest "simulate" pattern used elsewhere in this build (the SMS-confirm simulation, the
 // referral-signup simulation) — there's no other real person on the far end of this
