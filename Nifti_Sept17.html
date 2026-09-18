@@ -4030,7 +4030,13 @@ function maybeShowContextualTooltip(page){
   const info = CONTEXTUAL_TOOLTIPS[page];
   if(!info || tooltipsShown[page]) return;
   tooltipsShown[page] = true;
+  // Only one of these should ever be visible -- navigating between a few new pages within the
+  // same 8s window (easy to do while exploring) used to stack them on top of each other at the
+  // same bottom-right spot.
+  const existing = document.getElementById('contextualTooltip');
+  if(existing) existing.remove();
   const el = document.createElement('div');
+  el.id = 'contextualTooltip';
   el.style.cssText = 'position:fixed;bottom:24px;right:24px;max-width:280px;background:var(--ink);color:#fff;padding:14px 16px;border-radius:12px;font-size:15px;z-index:300;box-shadow:0 8px 24px rgba(0,0,0,.25);';
   el.innerHTML = `<div style="font-weight:800;margin-bottom:4px;">${info.title}</div><div style="opacity:.9;">${info.text}</div><div style="margin-top:8px;text-align:right;"><span style="cursor:pointer;font-weight:700;text-decoration:underline;" onclick="this.closest('div').parentElement.remove()">Got it</span></div>`;
   document.body.appendChild(el);
@@ -4226,6 +4232,18 @@ function navigate(page){
   document.getElementById('view-login').classList.add('hidden');
   document.getElementById('view-app').classList.add('hidden');
 
+  // The demo banner and contextual tooltips are position:fixed, appended straight to <body> --
+  // they sit outside the view containers hidden/shown above, so leaving the app shell for a
+  // marketing page (there's no ordinary click path to do this today, but the sidebar's own logo
+  // or a browser back/forward action could) would otherwise leave them floating over content
+  // that has nothing to do with the demo.
+  if(marketingPages.includes(page) || page === 'login'){
+    const banner = document.getElementById('demoModeBanner');
+    if(banner){ banner.remove(); document.body.style.paddingTop = ''; const sb = document.querySelector('.sidebar'); if(sb){ sb.style.top = ''; sb.style.height = ''; } }
+    const tip = document.getElementById('contextualTooltip');
+    if(tip) tip.remove();
+  }
+
   if(marketingPages.includes(page)){
     document.getElementById('view-'+page).classList.remove('hidden');
     if(page==='pricing') renderMarketingPricingGrid();
@@ -4357,15 +4375,25 @@ function startDemoOrder(){
   toggleTourBanner(true);
 }
 function toggleTourBanner(show){
+  // The banner is position:fixed (stays visible while scrolling), which means it reserves no
+  // document-flow space on its own -- left alone, it sits on top of the topbar instead of
+  // pushing it down. .sidebar is position:sticky;top:0;height:100vh, so it needs the same
+  // offset or its bottom would run past the viewport by the banner's own height.
   let banner = document.getElementById('demoModeBanner');
+  const sidebar = document.querySelector('.sidebar');
   if(show && !banner){
     banner = document.createElement('div');
     banner.id = 'demoModeBanner';
     banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:var(--green);color:#fff;text-align:center;padding:9px;font-weight:700;font-size:15.5px;z-index:400;';
     banner.innerHTML = 'You\'re viewing a sandboxed demo with sample data — nothing here is saved or sent. <span style="text-decoration:underline;cursor:pointer;" onclick="navigate(\'login\')">Sign up to use this for real →</span>';
     document.body.prepend(banner);
+    const h = banner.getBoundingClientRect().height;
+    document.body.style.paddingTop = h + 'px';
+    if(sidebar){ sidebar.style.top = h + 'px'; sidebar.style.height = `calc(100vh - ${h}px)`; }
   } else if(!show && banner){
     banner.remove();
+    document.body.style.paddingTop = '';
+    if(sidebar){ sidebar.style.top = ''; sidebar.style.height = ''; }
   }
 }
 // Section 6 #16 — deferred "Complete your profile later" banner, shown once after a supplier's
@@ -9916,8 +9944,8 @@ function renderPaymentPanel(id){
       <div style="font-weight:700;margin-bottom:6px;">Pay with GCash or Maya — real payment (sandbox/test mode)</div>
       <div style="font-size:14px;color:var(--ink);opacity:.8;margin-bottom:8px;">Opens an actual PayMongo checkout. The invoice only marks itself paid once PayMongo confirms the payment went through — not on your say-so.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn btn-primary" onclick="event.stopPropagation(); startGcashPayment('${id}')">Pay ${fmtPHP(balance)} with GCash →</button>
-        <button class="btn btn-primary" onclick="event.stopPropagation(); startMayaPayment('${id}')">Pay ${fmtPHP(balance)} with Maya →</button>
+        <button class="btn btn-primary" onclick="event.stopPropagation(); startGcashPayment('${id}', event.target)">Pay ${fmtPHP(balance)} with GCash →</button>
+        <button class="btn btn-primary" onclick="event.stopPropagation(); startMayaPayment('${id}', event.target)">Pay ${fmtPHP(balance)} with Maya →</button>
       </div>
       <div id="gcashPayError_${id}" style="font-size:14px;color:var(--danger);font-weight:600;margin-top:6px;"></div>
       <div id="mayaPayError_${id}" style="font-size:14px;color:var(--danger);font-weight:600;margin-top:6px;"></div>
@@ -9947,22 +9975,28 @@ function renderPaymentPanel(id){
     <button class="btn btn-primary" onclick="event.stopPropagation(); submitRecordPayment('${id}')">Record payment →</button>
   </div>`;
 }
-async function startGcashPayment(id){
+async function startGcashPayment(id, btn){
+  // Guards against a double-click firing two payment intents for the same invoice before the
+  // first request even resolves -- there was nothing stopping that before.
+  if(btn){ if(btn.disabled) return; btn.disabled = true; btn.textContent = 'Starting payment…'; }
   const errEl = document.getElementById('gcashPayError_'+id);
   if(errEl) errEl.textContent = '';
   const { data, error } = await sb.functions.invoke('create-gcash-payment', { body: { po_id: id } });
   if(error || !data || data.error){
     if(errEl) errEl.textContent = (data && data.error) || (error && error.message) || 'Could not start payment. Try again.';
+    if(btn){ btn.disabled = false; btn.textContent = `Pay ${fmtPHP(computeInvoicePayments(getPO(id)).balance)} with GCash →`; }
     return;
   }
   window.location.href = data.checkout_url; // real PayMongo (test mode) GCash checkout
 }
-async function startMayaPayment(id){
+async function startMayaPayment(id, btn){
+  if(btn){ if(btn.disabled) return; btn.disabled = true; btn.textContent = 'Starting payment…'; }
   const errEl = document.getElementById('mayaPayError_'+id);
   if(errEl) errEl.textContent = '';
   const { data, error } = await sb.functions.invoke('create-maya-payment', { body: { po_id: id } });
   if(error || !data || data.error){
     if(errEl) errEl.textContent = (data && data.error) || (error && error.message) || 'Could not start payment. Try again.';
+    if(btn){ btn.disabled = false; btn.textContent = `Pay ${fmtPHP(computeInvoicePayments(getPO(id)).balance)} with Maya →`; }
     return;
   }
   window.location.href = data.checkout_url; // real PayMongo (test mode) Maya checkout
