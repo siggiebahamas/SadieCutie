@@ -299,12 +299,12 @@
   .back-link{font-size:15.5px;color:var(--body);font-weight:600;margin-bottom:24px;display:block;text-align:center;}
 
   /* ============ APP SHELL (dashboard/suppliers/orders/inventory/invite/discover/analytics/settings) ============ */
-  /* Soft Mint — redefines --bg for the app/dashboard subtree only, so every component inside
-     that already reads var(--bg) (search box, filter chips, sunken panels, etc.) picks up the
-     new tone consistently, while the marketing pages outside #view-app keep the original --bg
-     from :root untouched. A flat background on the wrapper alone would leave those inner
-     components mismatched against the old warm tone. */
-  .app-view-wrap{display:flex;min-height:100vh;--bg:#F1F5F1;background:var(--bg);}
+  /* Mint didn't land — parked on a neutral off-white (Cloud White) as a safe default while a
+     final pick is made from the new round of options. Still redefines --bg for the app/dashboard
+     subtree only (see Nifti Background Concepts II), so every component inside that already
+     reads var(--bg) (search box, filter chips, sunken panels, etc.) stays consistent with it,
+     while the marketing pages outside #view-app keep the original --bg from :root untouched. */
+  .app-view-wrap{display:flex;min-height:100vh;--bg:#F8F8F6;background:var(--bg);}
   .sidebar{width:288px;background:var(--surface);border-right:1px solid var(--border);flex-shrink:0;padding:22px 16px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;}
   .sidebar .brand{padding:6px 8px 22px;}
   .sidebar .mark{width:24px;height:24px;}
@@ -374,7 +374,7 @@
   .msg-po-tabs{display:flex;gap:6px;flex-wrap:wrap;padding:10px 20px 0;}
   .msg-po-tab{padding:5px 12px;border-radius:100px;border:1px solid var(--border);background:var(--surface);font-size:15px;font-weight:700;color:var(--ink);cursor:pointer;}
   .msg-po-tab.active{background:var(--ink);color:#fff;border-color:var(--ink);}
-  .msg-po-summary{margin:10px 20px 0;padding:12px 14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:16px;color:var(--ink);display:flex;justify-content:space-between;align-items:center;}
+  .msg-po-summary{margin:10px 20px 0;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px;font-size:16px;color:var(--ink);display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 8px rgba(24,26,30,.06);}
   .msg-filter-bar input[type="date"]{padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-family:var(--font-b);font-size:16px;color:var(--ink);}
   .msg-filter-bar input[type="text"]{flex:1;min-width:140px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;font-family:var(--font-b);font-size:16px;color:var(--ink);}
   .sidebar-foot{margin-top:auto;padding:10px;font-size:15px;color:var(--faint);}
@@ -519,7 +519,7 @@
   .detail-sup{font-size:16px;color:var(--body);margin-top:3px;}
   .detail-badges{display:flex;gap:8px;margin:14px 0 18px;}
   .m-meta.late-text{color:var(--danger);}
-  .logi-note{margin-top:18px;padding:14px 16px;background:var(--bg);border-radius:10px;font-size:15.5px;color:var(--body);border:1px solid var(--border);}
+  .logi-note{margin-top:18px;padding:14px 16px;background:var(--surface);border-radius:10px;font-size:15.5px;color:var(--body);border:1px solid var(--border);box-shadow:0 2px 8px rgba(24,26,30,.06);}
 
   .wh-tabs{display:flex;gap:8px;margin-bottom:16px;}
   .wh-tab{padding:8px 16px;border-radius:9px;border:1px solid var(--border);background:var(--surface);font-size:15px;font-weight:700;color:var(--body);cursor:pointer;}
@@ -561,12 +561,12 @@
   .form-card h2{font-size:19px;font-weight:800;margin-bottom:18px;}
   .form-card .field select{width:100%;height:48px;padding:0 36px 0 15px;border:1.5px solid var(--border);border-radius:9px;font-family:var(--font-b);font-size:16.5px;background-color:var(--surface);color:var(--ink);box-sizing:border-box;-webkit-appearance:none;-moz-appearance:none;appearance:none;background-image:url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23555' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:16px;}
   .form-card .field textarea{width:100%;padding:13px 15px;border:1.5px solid var(--border);border-radius:9px;font-family:var(--font-b);font-size:16.5px;background:var(--surface);color:var(--ink);box-sizing:border-box;}
-  .preview-card{background:var(--bg);border:1px solid var(--border);border-radius:16px;padding:26px;}
+  .preview-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:26px;box-shadow:0 2px 8px rgba(24,26,30,.06);}
   .preview-card h2{font-size:16.5px;font-weight:700;margin-bottom:6px;}
   .preview-card .sub{font-size:15px;color:var(--body);margin-bottom:18px;}
-  .chat-bubble{background:var(--surface);border-radius:14px;padding:16px 18px;font-size:16.5px;line-height:1.6;border:1px solid var(--border);color:var(--ink);}
+  .chat-bubble{background:var(--bg);border-radius:14px;padding:16px 18px;font-size:16.5px;line-height:1.6;border:1px solid var(--border);color:var(--ink);}
   .chat-channel{display:flex;gap:8px;margin-top:14px;}
-  .channel-chip{padding:8px 15px;border-radius:100px;background:var(--surface);border:1.5px solid var(--border);font-size:15.5px;font-weight:700;color:var(--ink);cursor:pointer;transition:.15s;}
+  .channel-chip{padding:8px 15px;border-radius:100px;background:var(--bg);border:1.5px solid var(--border);font-size:15.5px;font-weight:700;color:var(--ink);cursor:pointer;transition:.15s;}
   .channel-chip:hover{border-color:var(--green);color:var(--green);}
   .channel-chip.selected{background:var(--green-soft);border-color:var(--green);color:var(--green);}
   .status-list{margin-top:28px;}
@@ -594,7 +594,7 @@
   .btn-connect{width:100%;background:var(--green);color:#fff;border:none;border-radius:9px;padding:12px;font-weight:700;font-size:16px;cursor:pointer;}
   .btn-connect:hover{background:var(--green-hover);}
   .btn-connect.sent{background:var(--bg);color:var(--body);cursor:default;}
-  .note-card{margin-top:24px;border:1px solid var(--border);background:var(--bg);border-radius:14px;padding:16px 20px;font-size:16px;color:var(--ink);}
+  .note-card{margin-top:24px;border:1px solid var(--border);background:var(--surface);border-radius:14px;padding:16px 20px;font-size:16px;color:var(--ink);box-shadow:0 2px 8px rgba(24,26,30,.06);}
   .note-card strong{display:block;font-size:15px;margin-bottom:4px;color:#5E3F26;}
 
   /* analytics */
@@ -2490,7 +2490,7 @@
       <div id="page-invite" class="app-page">
         <div class="page-head"><h1 id="inviteTitle">Invite a Supplier</h1><p id="inviteSub">Add someone you already order from. They join in under 5 minutes — no marketplace, no cold vetting.</p></div>
         <!-- Section 6 #1 — the invite is always a shareable link/message, same as a Viber invite; it never requires installing an app to receive or open. -->
-        <div style="font-size:15px;color:var(--ink);background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:10px 14px;margin-bottom:14px;">📱 No app download needed — this opens as a normal link inside whatever they already use (Viber, WhatsApp, email, SMS).</div>
+        <div style="font-size:15px;color:var(--ink);background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:10px 14px;margin-bottom:14px;box-shadow:0 2px 8px rgba(24,26,30,.06);">📱 No app download needed — this opens as a normal link inside whatever they already use (Viber, WhatsApp, email, SMS).</div>
         <div class="role-toggle" style="margin-bottom:20px;">
           <button id="inviteTabInvite" class="active" onclick="setInviteTab('invite')">Invite</button>
           <button id="inviteTabRfq" onclick="setInviteTab('rfq')">Request a Quote (RFQ)</button>
