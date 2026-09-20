@@ -3089,7 +3089,16 @@ async function loadMyBusinessContext(){
   currentAppRole = myBusiness.type; // 'buyer' or 'supplier' — fixed by the account, not togglable
   currentUserId = tm.id;
   if(myBusiness.type === 'buyer') ME_BUYER = myBusiness.id; else ME_SUPPLIER = myBusiness.id;
+  await loadMyTeamRoster();
   return true;
+}
+// Replaces the hardcoded teamMembers/supplierTeamMembers demo rosters with this business's real
+// team_members rows (active members and pending invites both) — see getActiveTeamMembers().
+async function loadMyTeamRoster(){
+  const { data, error } = await sb.from('team_members').select('*').eq('business_id', myBusiness.id).order('created_at');
+  if(error || !data) return;
+  const roster = data.map(m => ({ id:m.id, name:m.name, email:m.email, roles:m.roles, status:m.status }));
+  if(myBusiness.type === 'supplier') supplierTeamMembers = roster; else teamMembers = roster;
 }
 
 /* ============ PURCHASE ORDER SYNC (Phase 4, batch 1) ============
@@ -7737,11 +7746,11 @@ function renderTeamMembersList(){
   el.innerHTML = getActiveTeamMembers().map(m=>`
     <div>
     <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:12px;flex-wrap:wrap;">
-      <div><div style="font-weight:700;font-size:15.5px;color:var(--ink);">${m.name}</div><div style="font-size:15px;color:var(--ink);">${m.email}</div></div>
+      <div><div style="font-weight:700;font-size:15.5px;color:var(--ink);">${m.name}${m.status==='invited'?' <span class="status-tag" style="background:var(--lowstock-fill);color:#fff;">Invited — pending</span>':''}</div><div style="font-size:15px;color:var(--ink);">${m.email}</div></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center;">
         ${m.roles.map(r=>`<span class="status-tag">${r}</span>`).join('')}
         ${canManageRoles ? `<span class="row-action" onclick="openEditRolesForm('${m.id}')">Edit roles</span>` : ''}
-        <span class="row-action" style="color:var(--danger);margin-left:6px;" onclick="removeTeamMember('${m.id}')">Remove</span>
+        <span class="row-action" style="color:var(--danger);margin-left:6px;" onclick="removeTeamMember('${m.id}')">${m.status==='invited'?'Cancel invite':'Remove'}</span>
       </div>
     </div>
     <div id="editRolesForm_${m.id}"></div>
@@ -7762,17 +7771,25 @@ function openEditRolesForm(id){
     <button class="btn btn-outline" style="margin-top:10px;" onclick="document.getElementById('editRolesForm_${id}').innerHTML='';">Cancel</button>
   </div>`;
 }
-function saveEditedRoles(id){
+async function saveEditedRoles(id){
   if(!requirePermission('manageRoles')) return;
   const m = getActiveTeamMembers().find(t=>t.id===id);
   const newRoles = Array.from(document.querySelectorAll(`.tmEditRoleCheck_${id}:checked`)).map(c=>c.value);
   if(!newRoles.length){ showToast('Please select at least one role.'); return; }
   const oldRoles = m.roles;
-  m.roles = newRoles;
+  if(myBusiness){
+    const { error } = await sb.from('team_members').update({ roles: newRoles }).eq('id', id);
+    if(error){ showToast("Couldn't update those roles — try again.", 'error'); return; }
+    await loadMyTeamRoster();
+  } else {
+    m.roles = newRoles;
+  }
   logAudit('role_reassigned', 'teamMember', id, 'roles', oldRoles.join(', '), newRoles.join(', '));
   // If the Owner just reassigned the current session's own identity, that takes effect
-  // immediately — no stale preview left over from before the change.
-  if(id === currentUserId){ previewRole = null; renderSidebarForViewAsRole(); }
+  // immediately — no stale preview left over from before the change. myTeamMember.roles (used
+  // by getCurrentUserRoles() ahead of the roster array — see its comment) needs the same update,
+  // or it'd keep serving the pre-edit roles until the next full reload.
+  if(id === currentUserId){ if(myTeamMember) myTeamMember.roles = newRoles; previewRole = null; renderSidebarForViewAsRole(); }
   const formEl_editRoles = document.getElementById('editRolesForm_'+id); if(formEl_editRoles) formEl_editRoles.innerHTML = '';
   renderTeamMembersList();
   showNotificationToast(`${m.name}'s roles updated.`);
@@ -7840,29 +7857,54 @@ function openAddTeamMemberForm(){
   if(el.innerHTML.trim()!==''){ el.innerHTML=''; return; }
   el.innerHTML = `<div class="spine-inline-action" style="margin-top:10px;">
     <div class="row-2"><div class="field"><label>Name</label><input type="text" id="tmName"></div><div class="field"><label>Email</label><input type="text" id="tmEmail"></div></div>
+    ${myBusiness ? `<div style="font-size:14px;color:var(--ink);opacity:.7;margin:-4px 0 10px;">They'll get the roles below the moment they sign up at Nifti using this exact email — nothing else to send.</div>` : ''}
     <div class="field"><label>Roles (select all that apply — one person can hold more than one)</label>
       <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;">
         ${getAllRoleNames().map(r=>`<label style="display:flex;align-items:center;gap:5px;font-size:15px;color:var(--ink);"><input type="checkbox" class="tmRoleCheck" value="${r}"> ${r}</label>`).join('')}
       </div>
     </div>
-    <button class="btn btn-primary" style="margin-top:10px;" onclick="saveTeamMember()">Add Member →</button>
+    <button class="btn btn-primary" style="margin-top:10px;" onclick="saveTeamMember()">${myBusiness ? 'Invite →' : 'Add Member →'}</button>
+    <div id="addTeamMemberError" style="margin-top:8px;font-size:14.5px;color:var(--danger);"></div>
   </div>`;
 }
-function saveTeamMember(){
+async function saveTeamMember(){
   const nameEl = document.getElementById('tmName');
   if(!nameEl) return; // form isn't open — nothing to submit
   const name = nameEl.value.trim();
   const email = document.getElementById('tmEmail').value.trim();
   const roles = Array.from(document.querySelectorAll('.tmRoleCheck:checked')).map(c=>c.value);
   if(!name || !roles.length){ showToast('Please add a name and at least one role.'); return; }
-  getActiveTeamMembers().push({id:'tm'+Date.now(), name, email, roles});
+  if(!myBusiness){
+    getActiveTeamMembers().push({id:'tm'+Date.now(), name, email, roles});
+    document.getElementById('addTeamMemberForm').innerHTML='';
+    renderTeamMembersList();
+    return;
+  }
+  if(!email){ markFieldInvalid('tmEmail', 'An email is required to invite someone.'); return; }
+  const errEl = document.getElementById('addTeamMemberError');
+  if(errEl) errEl.textContent = '';
+  const { error } = await sb.from('team_members').insert({ business_id: myBusiness.id, name, email, roles, status: 'invited' });
+  if(error){
+    if(errEl) errEl.textContent = error.code === '23505' ? 'That email is already invited or already on your team.' : "Couldn't send that invite — try again.";
+    return;
+  }
+  await loadMyTeamRoster();
   document.getElementById('addTeamMemberForm').innerHTML='';
   renderTeamMembersList();
+  showToast(`Invited ${name} — they'll get these roles as soon as they sign up.`, 'success');
 }
-function removeTeamMember(id){
+async function removeTeamMember(id){
   if(!requirePermission('manageTeam')) return;
-  if(currentAppRole==='supplier') supplierTeamMembers = supplierTeamMembers.filter(m=>m.id!==id);
-  else teamMembers = teamMembers.filter(m=>m.id!==id);
+  if(id === currentUserId){ showToast("You can't remove yourself."); return; }
+  if(!myBusiness){
+    if(currentAppRole==='supplier') supplierTeamMembers = supplierTeamMembers.filter(m=>m.id!==id);
+    else teamMembers = teamMembers.filter(m=>m.id!==id);
+    renderTeamMembersList();
+    return;
+  }
+  const { error } = await sb.from('team_members').delete().eq('id', id);
+  if(error){ showToast("Couldn't remove that person — try again.", 'error'); return; }
+  await loadMyTeamRoster();
   renderTeamMembersList();
 }
 
