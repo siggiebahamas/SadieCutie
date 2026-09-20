@@ -299,7 +299,12 @@
   .back-link{font-size:15.5px;color:var(--body);font-weight:600;margin-bottom:24px;display:block;text-align:center;}
 
   /* ============ APP SHELL (dashboard/suppliers/orders/inventory/invite/discover/analytics/settings) ============ */
-  .app-view-wrap{display:flex;min-height:100vh;}
+  /* Soft Mint — redefines --bg for the app/dashboard subtree only, so every component inside
+     that already reads var(--bg) (search box, filter chips, sunken panels, etc.) picks up the
+     new tone consistently, while the marketing pages outside #view-app keep the original --bg
+     from :root untouched. A flat background on the wrapper alone would leave those inner
+     components mismatched against the old warm tone. */
+  .app-view-wrap{display:flex;min-height:100vh;--bg:#F1F5F1;background:var(--bg);}
   .sidebar{width:288px;background:var(--surface);border-right:1px solid var(--border);flex-shrink:0;padding:22px 16px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;}
   .sidebar .brand{padding:6px 8px 22px;}
   .sidebar .mark{width:24px;height:24px;}
