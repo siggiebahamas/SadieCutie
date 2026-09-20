@@ -2764,7 +2764,12 @@
       <div id="page-datacenter" class="app-page">
         <div class="page-head"><h1 data-i18n="head_datacenter">Upload Data</h1><p>Import your product list from a spreadsheet — map columns and preview every row before anything is saved, and undo any import afterward.</p></div>
 
+        <div class="role-toggle" style="margin-bottom:16px;">
+          <button class="active" id="dcImportsViewBtn" onclick="setDataCenterView('imports', this)">📥 Import Data</button>
+          <button id="dcExploreViewBtn" onclick="setDataCenterView('explore', this)">🔍 Explore Records</button>
+        </div>
         <div id="dcTabImports"></div>
+        <div id="dcTabExplore" class="hidden"></div>
       </div>
 
       <!-- ===== PAGE: SETTINGS ===== -->
@@ -3702,7 +3707,7 @@ async function logOut(){
   await sb.auth.signOut();
   poRealtimeChannels.forEach(ch => sb.removeChannel(ch));
   poRealtimeChannels = [];
-  myBusiness = null; myTeamMember = null;
+  myBusiness = null; myTeamMember = null; currentUserId = 'tm1';
   navigate('index');
 }
 function openHelpCenter(){
@@ -4145,6 +4150,12 @@ function getRoleAllowedPages(roleName){
 let currentUserId = 'tm1'; // "Dela Cruz (You)" — the identity this browser session represents
 let previewRole = null; // an Owner/General Manager can temporarily preview a lower role's view
 function getCurrentUserRoles(){
+  // A real signed-in account's own roles live in myTeamMember (fetched from Supabase in
+  // loadMyBusinessContext) — not in the hardcoded teamMembers/supplierTeamMembers demo arrays,
+  // which currentUserId (a real UUID for a real account) never matches. Falling through to the
+  // demo-array lookup below for a real account always missed and defaulted to ['Owner']
+  // regardless of the role actually assigned in the database.
+  if(myTeamMember && myTeamMember.id === currentUserId) return myTeamMember.roles;
   const me = getActiveTeamMembers().find(m=>m.id===currentUserId);
   return me ? me.roles : ['Owner'];
 }
@@ -4163,7 +4174,6 @@ function computeAllowedPages(roles){
   return [...pages];
 }
 function isPageAllowedForViewAsRole(page){
-  if(currentAppRole !== 'buyer') return true;
   const allowed = computeAllowedPages(getEffectiveRoles());
   return allowed === null || allowed.includes(page);
 }
@@ -4254,7 +4264,7 @@ function renderSidebarForViewAsRole(){
   const allowed = computeAllowedPages(getEffectiveRoles());
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
     const page = el.getAttribute('data-page');
-    const restricted = currentAppRole==='buyer' && allowed && !allowed.includes(page);
+    const restricted = allowed && !allowed.includes(page);
     el.style.display = restricted ? 'none' : '';
   });
 }
@@ -4263,7 +4273,7 @@ function renderViewAsRoleMenu(){
   if(!el) return;
   // A restricted person (Purchasing Agent, Warehouse Manager, Finance, Viewer) never sees this
   // section at all — there is no control here for them to grant themselves more access.
-  if(currentAppRole !== 'buyer' || !isPrivilegedUser()){ el.innerHTML = ''; return; }
+  if(!isPrivilegedUser()){ el.innerHTML = ''; return; }
   const effective = previewRole || getCurrentUserRoles()[0];
   el.innerHTML = `<div style="padding:8px 12px 4px;font-size:12px;font-weight:700;color:var(--ink);opacity:.6;text-transform:uppercase;letter-spacing:.03em;">Preview as</div>` +
     getAllRoleNames().map(role => `<div class="notif-item" style="cursor:pointer;" onclick="closeUserMenu(); setPreviewRole('${role}');"><div><div class="notif-text">${role}${effective===role?' ✓':''}</div></div></div>`).join('') +
@@ -4339,7 +4349,7 @@ function navigate(page){
       setAnalyticsRole(currentAppRole, targetBtn);
     }
     if(page==='datacenter'){
-      renderDataCenterImportsTab();
+      setDataCenterView('imports', document.getElementById('dcImportsViewBtn'));
     }
     if(page==='inventory'){
       document.getElementById('buyerInventoryView').classList.toggle('hidden', currentAppRole!=='buyer');
@@ -16285,6 +16295,14 @@ function undoImportBatch(batchId){
   renderDataCenterImportsTab();
   scheduleNiftiSave();
   showToast(`Import from ${batch.filename} was rolled back.`, 'success');
+}
+function setDataCenterView(view, btn){
+  document.querySelectorAll('#page-datacenter .role-toggle button').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  document.getElementById('dcTabImports').classList.toggle('hidden', view!=='imports');
+  document.getElementById('dcTabExplore').classList.toggle('hidden', view!=='explore');
+  if(view==='imports') renderDataCenterImportsTab();
+  else renderDataCenterExplore();
 }
 function renderDataCenterImportsTab(){
   const el = document.getElementById('dcTabImports');
