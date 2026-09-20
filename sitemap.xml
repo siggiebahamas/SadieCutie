@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  This is a one-URL app today (no server-side routing — see SEO_META / updateSeoMeta() in
+  Nifti_Sept17.html), so there is only one entry to list. If /features and /pricing ever become
+  real crawlable paths of their own, add them here as separate <url> entries.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://siggiebahamas.github.io/SadieCutie/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>

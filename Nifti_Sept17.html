@@ -3,7 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Nifti — Procurement for Philippine Businesses</title>
+<title>Nifti — Procurement Software for Philippine Businesses | Orders, Inventory & Payments</title>
+<meta name="description" content="Nifti is a private procurement platform built for Philippine SMEs — manage purchase orders, inventory, and GCash/Maya payments with the suppliers you already trust. No public marketplace, no cold vetting.">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://siggiebahamas.github.io/SadieCutie/">
+<meta name="keywords" content="procurement software Philippines, purchase order system Philippines, inventory management Philippines, B2B ordering platform, supplier management software, GCash business payments, Maya business payments">
+<!-- Open Graph / social share preview -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Nifti">
+<meta property="og:title" content="Nifti — Procurement Software for Philippine Businesses">
+<meta property="og:description" content="Manage purchase orders, inventory, and payments with the suppliers you already trust — built for Philippine SMEs, with GCash and Maya payments built in.">
+<meta property="og:url" content="https://siggiebahamas.github.io/SadieCutie/">
+<meta property="og:image" content="https://siggiebahamas.github.io/SadieCutie/icon-512.png">
+<meta property="og:locale" content="en_PH">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Nifti — Procurement Software for Philippine Businesses">
+<meta name="twitter:description" content="Manage purchase orders, inventory, and payments with the suppliers you already trust — built for Philippine SMEs, with GCash and Maya payments built in.">
+<meta name="twitter:image" content="https://siggiebahamas.github.io/SadieCutie/icon-512.png">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1B6B40">
 <link rel="icon" href="icon-512.png">
@@ -13,6 +29,19 @@
 <meta name="apple-mobile-web-app-title" content="Nifti">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Nifti",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Web",
+  "description": "Private procurement platform for Philippine businesses — purchase orders, inventory, and payments with the suppliers you already trust.",
+  "url": "https://siggiebahamas.github.io/SadieCutie/",
+  "offers": { "@type": "Offer", "priceCurrency": "PHP", "price": "0", "description": "Free plan available" },
+  "areaServed": { "@type": "Country", "name": "Philippines" }
+}
+</script>
 <style>
   :root{
     --bg:#FAF7F2; --bg-alt:#FFFFFF; --surface:#FFFFFF; --border:#E7DECB;
@@ -2785,20 +2814,13 @@
         </div>
 
         <div class="settings-card">
-          <h2>Preview mode</h2>
-          <div class="sub">Preview the app with no data. Nothing is deleted.</div>
-          <div style="display:flex;align-items:center;gap:12px;margin-top:12px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;">
-            <div class="switch" onclick="togglePreviewEmptyState(this)"><div class="knob"></div></div>
-            <div><div style="font-weight:700;font-size:15.5px;color:var(--ink);">Preview empty state</div><div style="font-size:15px;color:var(--ink);">Doesn't delete anything — just shows the first-time onboarding view. Turn off to go back to your data.</div></div>
-          </div>
-        </div>
-
-        <div class="settings-card">
           <h2>Saved data</h2>
           <div class="sub">If saves keep failing (an error mentioning "state save failed" or "storage set failed"), the saved copy of your session may be stuck oversized from before this was fixed. Resetting clears that saved copy and starts fresh — it does not affect this session, which keeps working until you reload.</div>
           <button class="btn btn-outline" style="margin-top:10px;color:var(--danger);border-color:var(--danger);" onclick="resetNiftiSavedState()">Reset saved data</button>
           <div id="resetSavedDataConfirm" style="margin-top:10px;"></div>
         </div>
+
+        <div class="settings-card" id="downstreamSalesSettingsCard"></div>
 
         <div class="settings-card">
           <h2>Display</h2>
@@ -2851,8 +2873,6 @@
           <div class="sub">Every price override, stock adjustment, cancelled order, permission denial, and approval decision — this was already being recorded quietly in the background; this just makes it visible.</div>
           <div id="auditLogContent"></div>
         </div>
-
-        <div class="settings-card" id="downstreamSalesSettingsCard"></div>
 
         <div class="settings-card">
           <h2>💬 Need Help? Contact Nifti Support</h2>
@@ -3247,6 +3267,27 @@ function applyRealAccountUI(){
 
 /* ============ NAVIGATION ============ */
 const marketingPages = ['index','features','pricing','privacy','terms'];
+// Per-page <title>/description for the marketing pages. This is a single-URL app (no real
+// routing), so this doesn't win Google separate rankable pages for "pricing" vs "features" —
+// that needs actual distinct URLs — but it fixes the tab title and keeps the meta description
+// honest for whichever view is actually on screen, and any share link generated while on a
+// given page reflects that page instead of always showing the homepage's copy.
+const SEO_META = {
+  index: { title: 'Nifti — Procurement Software for Philippine Businesses | Orders, Inventory & Payments', description: 'Nifti is a private procurement platform built for Philippine SMEs — manage purchase orders, inventory, and GCash/Maya payments with the suppliers you already trust. No public marketplace, no cold vetting.' },
+  features: { title: 'Features — Nifti Procurement Software', description: 'Everything Nifti does for Philippine SMEs: purchase orders, inventory tracking, supplier messaging, GCash and Maya payments, and BIR-ready sales invoices — all in one place.' },
+  pricing: { title: 'Pricing — Nifti Procurement Software', description: 'Simple, transparent pricing for Nifti — the procurement platform built for Philippine SMEs. See plans and what\'s included.' },
+};
+function updateSeoMeta(page){
+  const meta = SEO_META[page];
+  if(!meta) return;
+  document.title = meta.title;
+  const descTag = document.querySelector('meta[name="description"]');
+  if(descTag) descTag.setAttribute('content', meta.description);
+  const ogTitle = document.querySelector('meta[property="og:title"]');
+  if(ogTitle) ogTitle.setAttribute('content', meta.title);
+  const ogDesc = document.querySelector('meta[property="og:description"]');
+  if(ogDesc) ogDesc.setAttribute('content', meta.description);
+}
 // Section 5 #4 — offline action queue. Message sends, PO creation/sending, and milestone
 // updates still apply their state change immediately (optimistic UI) even while offline; they're
 // tagged "pending sync" until the connection returns, at which point they're cleared automatically.
@@ -3960,17 +4001,6 @@ let downstreamSales = [
   {id:'sale3', customerId:'cust3', date:'2026-08-22', lineItems:[{product:'Angle Bars', qty:15, unitCost:85, unitPrice:110}], payments:[]},
 ];
 let downstreamSaleIdCounter = 4;
-let previewEmptyState = false;
-function togglePreviewEmptyState(el){
-  previewEmptyState = !previewEmptyState;
-  el.classList.toggle('on', previewEmptyState);
-  if(document.getElementById('orderRows')) renderOrdersTable();
-  if(document.getElementById('suppliersTableBody')){ renderSupplierChips(); renderSuppliersTable(); }
-  if(document.getElementById('supplierOrderRows')) renderSupplierOrdersTable();
-  if(document.getElementById('convList')) renderConversationList();
-  if(document.getElementById('invTableBody')) renderInventoryTable();
-  if(document.getElementById('supplyTableBody')) renderSupplyTable();
-}
 // Same non-native-confirm() inline pattern used everywhere else in this file — a real confirm()
 // can be silently auto-dismissed in some preview/testing environments. This clears the saved
 // blob under NIFTI_STORAGE_KEY only; it does not touch anything in the current in-memory
@@ -4271,6 +4301,7 @@ function navigate(page){
 
   if(marketingPages.includes(page)){
     document.getElementById('view-'+page).classList.remove('hidden');
+    updateSeoMeta(page);
     if(page==='pricing') renderMarketingPricingGrid();
   } else if(page === 'login'){
     document.getElementById('view-login').classList.remove('hidden');
@@ -4395,7 +4426,6 @@ function pickRole(el, role){
 let currentLanguage = 'EN';
 // Section 6 #9 — "Try a Demo Order": opens the sandboxed dashboard with sample data, no signup.
 function startDemoOrder(){
-  previewEmptyState = false; // ensure sample data shows, not the empty-state
   navigate('dashboard');
   toggleTourBanner(true);
 }
@@ -5202,7 +5232,7 @@ function saveSupplyEdit(code){
 }
 function renderSupplyTable(){
   if(!document.getElementById('supplyTableBody')) return;
-  let rows = previewEmptyState ? [] : supplyData;
+  let rows = supplyData;
   if(supplyLocationFilter !== 'all') rows = rows.filter(i=>i.location===supplyLocationFilter);
   if(supplyStatusFilter !== 'all') rows = rows.filter(i=>getSupplyStatus(i)===supplyStatusFilter);
 
@@ -5265,21 +5295,21 @@ function renderSupplyTable(){
     return mainRow + expandRow;
   }).join('');
 
-  document.getElementById('supplyTableBody').innerHTML = html || (previewEmptyState
+  document.getElementById('supplyTableBody').innerHTML = html || (supplyData.length===0
     ? `<tr><td colspan="${totalCols}" style="padding:0;"><div style="text-align:center;padding:48px 24px;">
         <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:6px;">No products in your catalog yet</div>
         <div style="font-size:15.5px;color:var(--ink);">Add what you supply so buyers can find it and place orders against real stock.</div>
       </div></td></tr>`
     : `<tr><td colspan="${totalCols}" style="text-align:center;color:var(--ink);padding:30px;">No products match this filter.</td></tr>`);
 
-  const healthyCount = previewEmptyState ? 0 : supplyData.filter(i=>getSupplyStatus(i)==='healthy').length;
-  const tightCount = previewEmptyState ? 0 : supplyData.filter(i=>getSupplyStatus(i)==='tight').length;
-  const oversoldCount = previewEmptyState ? 0 : supplyData.filter(i=>getSupplyStatus(i)==='oversold').length;
+  const healthyCount = supplyData.filter(i=>getSupplyStatus(i)==='healthy').length;
+  const tightCount = supplyData.filter(i=>getSupplyStatus(i)==='tight').length;
+  const oversoldCount = supplyData.filter(i=>getSupplyStatus(i)==='oversold').length;
   const elTotal = document.getElementById('supplyStatTotal');
   const elHealthy = document.getElementById('supplyStatHealthy');
   const elTight = document.getElementById('supplyStatTight');
   const elOversold = document.getElementById('supplyStatOversold');
-  if(elTotal) elTotal.textContent = previewEmptyState ? 0 : supplyData.length;
+  if(elTotal) elTotal.textContent = supplyData.length;
   if(elHealthy) elHealthy.textContent = healthyCount;
   if(elTight) elTight.textContent = tightCount;
   if(elOversold) elOversold.textContent = oversoldCount;
@@ -5442,8 +5472,8 @@ function renderInventoryTable(){
   if(!document.getElementById('invTableBody')) return;
   renderInventoryStatsRow();
   renderRestockSuggestionsPanel();
-  let rows = previewEmptyState ? [] : inventoryData.filter(i => invWarehouseFilter==='all' || i.warehouse===invWarehouseFilter);
-  rows = previewEmptyState ? [] : rows.filter(i => invStatusFilter==='all' || i.status===invStatusFilter);
+  let rows = inventoryData.filter(i => invWarehouseFilter==='all' || i.warehouse===invWarehouseFilter);
+  rows = rows.filter(i => invStatusFilter==='all' || i.status===invStatusFilter);
 
   const theadEl = document.getElementById('inventoryTheadRow');
   if(theadEl){
@@ -5605,7 +5635,7 @@ function renderInventoryTable(){
     return mainRow + expandRow;
   }).join('');
 
-  document.getElementById('invTableBody').innerHTML = html || (previewEmptyState
+  document.getElementById('invTableBody').innerHTML = html || (inventoryData.length===0
     ? `<tr><td colspan="${totalCols}" style="padding:0;"><div style="text-align:center;padding:48px 24px;">
         <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:6px;">No inventory tracked yet</div>
         <div style="font-size:15.5px;color:var(--faint);">Add your SKUs here to track stock levels and get reorder alerts before you run out.</div>
@@ -5697,7 +5727,7 @@ function renderSupplierChips(){
 function renderSuppliersTable(){
   if(!document.getElementById('suppliersTableBody')) return;
   const isSupplierRole = currentAppRole === 'supplier';
-  const dataset = previewEmptyState ? [] : (isSupplierRole ? buyersData : suppliersData);
+  const dataset = isSupplierRole ? buyersData : suppliersData;
   let rows = dataset;
   if(supplierFilter === 'attention') rows = rows.filter(s=>{ const r = computeCounterpartReliability(s.id, isSupplierRole); return r.status==='ok' && r.score < 75; });
   else if(supplierFilter !== 'all') rows = rows.filter(s=>s.category.includes(supplierFilter));
@@ -5737,7 +5767,7 @@ function renderSuppliersTable(){
     return mainRow + expandRow;
   }).join('');
 
-  document.getElementById('suppliersTableBody').innerHTML = html || (previewEmptyState
+  document.getElementById('suppliersTableBody').innerHTML = html || (dataset.length===0
     ? `<tr><td colspan="5" style="padding:0;"><div style="text-align:center;padding:48px 24px;">
         <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:6px;">${isSupplierRole ? "You haven't added any buyers yet" : "You haven't added any suppliers yet"}</div>
         <div style="font-size:15.5px;color:var(--ink);margin-bottom:16px;">Add someone you already order from — they join in under 5 minutes, no marketplace, no cold vetting.</div>
@@ -5821,7 +5851,8 @@ function totalUnread(){ return getConversations().reduce((sum,c)=>sum+c.unread,0
 function renderConversationList(){
   const searchInput = document.getElementById('msgSearchInput');
   const term = (searchInput ? searchInput.value : '').toLowerCase();
-  let list = previewEmptyState ? [] : getConversations().filter(c => c.name.toLowerCase().includes(term));
+  const allConvs = getConversations();
+  let list = allConvs.filter(c => c.name.toLowerCase().includes(term));
   if(msgFilter==='unread') list = list.filter(c=>c.unread>0);
   document.getElementById('convList').innerHTML = list.map(c=>{
     const last = c.messages[c.messages.length-1];
@@ -5834,7 +5865,7 @@ function renderConversationList(){
       </div>
       ${c.unread>0 ? `<span class="conv-unread-badge">${c.unread}</span>` : ''}
     </div>`;
-  }).join('') || (previewEmptyState
+  }).join('') || (allConvs.length===0
     ? `<div style="padding:32px 20px;text-align:center;color:var(--ink);">
         <div style="font-weight:800;font-size:15.5px;margin-bottom:6px;">No conversations yet</div>
         <div style="font-size:15px;">Every message with a supplier or buyer will show up here, organized by relationship.</div>
@@ -8235,9 +8266,9 @@ function getSupplierActionColorClass(o){
 }
 function renderOrdersTable(){
   if(!document.getElementById('orderRows')) return; // see note on renderSupplierFulfillmentDashboard above — same reasoning, buyer side
-  let rows = previewEmptyState ? [] : getBuyerPOs();
-  const localCount = previewEmptyState ? 0 : getBuyerPOs().filter(o=>o.type==='local').length;
-  const freightCount = previewEmptyState ? 0 : getBuyerPOs().filter(o=>o.type==='freight').length;
+  let rows = getBuyerPOs();
+  const localCount = getBuyerPOs().filter(o=>o.type==='local').length;
+  const freightCount = getBuyerPOs().filter(o=>o.type==='freight').length;
   if(ordersFilter === 'local') rows = rows.filter(o=>o.type==='local');
   if(ordersFilter === 'freight') rows = rows.filter(o=>o.type==='freight');
   rows = rows.filter(o => ordersColorFilter[COLOR_CLASS_TO_CAT[getBuyerStatusColorClass(o)]]);
@@ -8258,7 +8289,7 @@ function renderOrdersTable(){
   updateOrdersSortArrows('sortArrow_');
   renderOrdersSortBar();
 
-  document.querySelectorAll('#buyerOrdersView .tabs-row .tab')[0].textContent = `All (${previewEmptyState ? 0 : getBuyerPOs().length})`;
+  document.querySelectorAll('#buyerOrdersView .tabs-row .tab')[0].textContent = `All (${getBuyerPOs().length})`;
   document.querySelectorAll('#buyerOrdersView .tabs-row .tab')[1].textContent = `Local (${localCount})`;
   document.querySelectorAll('#buyerOrdersView .tabs-row .tab')[2].textContent = `Import / Freight (${freightCount})`;
 
@@ -8277,7 +8308,7 @@ function renderOrdersTable(){
       <td>${renderStatusPill(o)}</td><td>${fmtPHP(poTotal(o))}</td>
       <td><span class="status-pill ${getBuyerActionColorClass(o)}">${getBuyerNextAction(o)}</span></td>
     </tr>`;
-  }).join('') || (previewEmptyState || getBuyerPOs().length===0
+  }).join('') || (getBuyerPOs().length===0
     ? `<tr><td colspan="6" style="padding:0;"><div style="text-align:center;padding:48px 24px;">
         <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:6px;">No purchase orders yet</div>
         <div style="font-size:15.5px;color:var(--ink);margin-bottom:16px;">Once you invite a supplier, you can create your first PO here — no marketplace, no cold vetting.</div>
@@ -11617,7 +11648,7 @@ function renderSupplierPoDetail(o){
 }
 function renderSupplierOrdersTable(){
   if(!document.getElementById('supplierOrderRows')) return; // see note on renderSupplierFulfillmentDashboard above
-  let rows = previewEmptyState ? [] : getSupplierPOs().filter(o=>o.status!=='draft');
+  let rows = getSupplierPOs().filter(o=>o.status!=='draft');
   const localCount = rows.filter(o=>o.type==='local').length;
   const freightCount = rows.filter(o=>o.type==='freight').length;
   if(supplierOrdersTypeFilter !== 'all') rows = rows.filter(o=>o.type===supplierOrdersTypeFilter);
@@ -11643,7 +11674,7 @@ function renderSupplierOrdersTable(){
   renderSupplierOrdersSortBar();
 
   const tabs = document.querySelectorAll('#supplierOrdersTabs .tab');
-  if(tabs.length){ tabs[0].textContent = `All (${previewEmptyState ? 0 : getSupplierPOs().filter(o=>o.status!=='draft').length})`; tabs[1].textContent = `Local (${localCount})`; tabs[2].textContent = `Import / Freight (${freightCount})`; }
+  if(tabs.length){ tabs[0].textContent = `All (${getSupplierPOs().filter(o=>o.status!=='draft').length})`; tabs[1].textContent = `Local (${localCount})`; tabs[2].textContent = `Import / Freight (${freightCount})`; }
 
   const html = rows.map(o=>{
     const selected = expandedSupplierOrderPo===o.id;
@@ -11662,7 +11693,7 @@ function renderSupplierOrdersTable(){
       <td><span class="row-action">${selected ? 'Close ▲' : 'View ▼'}</span></td>
     </tr>`;
   }).join('');
-  document.getElementById('supplierOrderRows').innerHTML = html || (previewEmptyState
+  document.getElementById('supplierOrderRows').innerHTML = html || (getSupplierPOs().filter(o=>o.status!=='draft').length===0
     ? `<tr><td colspan="7" style="padding:0;"><div style="text-align:center;padding:48px 24px;">
         <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:6px;">No orders yet</div>
         <div style="font-size:15.5px;color:var(--ink);">Once a buyer sends you a purchase order, it'll show up here to confirm and fulfill.</div>

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://siggiebahamas.github.io/SadieCutie/sitemap.xml
