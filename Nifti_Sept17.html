@@ -3121,6 +3121,10 @@ async function loadMyBusinessContext(){
   currentAppRole = myBusiness.type; // 'buyer' or 'supplier' — fixed by the account, not togglable
   currentUserId = tm.id;
   if(myBusiness.type === 'buyer') ME_BUYER = myBusiness.id; else ME_SUPPLIER = myBusiness.id;
+  // Scope local persistence to this business — see the note on NIFTI_STORAGE_KEY's declaration.
+  // Whatever bootNifti()/loadNiftiState() already loaded under the demo key before this ran gets
+  // replaced below by this business's own saved copy, if it has one.
+  NIFTI_STORAGE_KEY = 'nifti-app-state-v1:biz-' + myBusiness.id;
   await loadMyTeamRoster();
   return true;
 }
@@ -3261,10 +3265,11 @@ async function handleSignIn(){
   if(error){ if(errEl) errEl.textContent = error.message; return; }
   const ok = await loadMyBusinessContext();
   if(!ok){ if(errEl) errEl.textContent = "Signed in, but couldn't find your business account. Contact support."; return; }
-  await loadRealPurchaseOrders();
-  subscribeToPurchaseOrders();
-  applyRealAccountUI();
-  navigate('dashboard');
+  // A full reload (rather than continuing in this tab) sends this through bootNifti()'s own
+  // sequence, which is what actually scopes local storage to this business — see
+  // NIFTI_STORAGE_KEY. Without it, whatever was in memory from browsing signed-out (or from a
+  // previous account on this same browser) would carry straight through into this session.
+  window.location.reload();
 }
 
 async function handleSignUp(businessType){
@@ -3290,10 +3295,9 @@ async function handleSignUp(businessType){
   }
   const ok = await loadMyBusinessContext();
   if(!ok){ if(errEl) errEl.textContent = "Account created, but couldn't load your business yet. Try signing in."; return; }
-  await loadRealPurchaseOrders();
-  subscribeToPurchaseOrders();
-  applyRealAccountUI();
-  navigate('dashboard');
+  // Same reason as handleSignIn(): a reload sends this through bootNifti()'s own sequence, which
+  // is what actually scopes local storage to this business.
+  window.location.reload();
 }
 
 // Swaps the demo chip name / role toggle for what a real signed-in account should show — a
@@ -3748,8 +3752,12 @@ async function logOut(){
   await sb.auth.signOut();
   poRealtimeChannels.forEach(ch => sb.removeChannel(ch));
   poRealtimeChannels = [];
-  myBusiness = null; myTeamMember = null; currentUserId = 'tm1';
-  navigate('index');
+  // A full reload, not just navigate('index') — this business's data (custom roles, tax
+  // profile, notification settings, price agreements, and everything else this session loaded
+  // into memory under its scoped storage key) needs to actually leave memory, not just have its
+  // account pointer cleared. Without this, the very next sign-in on this same tab/browser would
+  // start from this business's leftover in-memory state instead of a clean slate.
+  window.location.reload();
 }
 function openHelpCenter(){
   document.getElementById('helpCenterModal').classList.remove('hidden');
@@ -4852,7 +4860,12 @@ function invCancel(){
 }
 function invSubmitReorder(code){
   if(!requirePermission('reorderStock')) return;
-  if(!requireAutoReplenishmentEntitlement()) return;
+  // This is the manual, user-clicked "one-click reorder" — the Essential-tier feature the
+  // pricing page promises. It was gated by the Growth-tier auto-replenishment check instead,
+  // which blocked Essential customers from a feature they were already paying for and telling
+  // them to upgrade to an unrelated tier to get it. requireAutoReplenishmentEntitlement() is
+  // still the right check for the actually-automatic path (see quickReorderFromInsight()).
+  if(!requireReorderToolsEntitlement()) return;
   const item = inventoryData.find(i=>i.code===code);
   const qtyInput = document.getElementById('reorderQty_'+code);
   const dateInput = document.getElementById('reorderDate_'+code);
@@ -9721,6 +9734,15 @@ function openNegotiateForm(id, side){
   if(el.innerHTML.trim() !== ''){ el.innerHTML = ''; return; }
   const po = getPO(id);
   if(!po || !po.counter) return; // the counter this was responding to is no longer there — status moved on since this button was rendered
+  // Same reason as openCounterForm(): the whole counter mechanism is a single unitPrice, not one
+  // per line item — defensive guard here too in case po.counter ever gets set on a multi-item PO
+  // outside submitCounter (e.g. seed/demo data).
+  if(po.lineItems.length > 1){
+    el.innerHTML = `<div class="spine-inline-action" style="margin-top:8px;">
+      <div style="font-size:15px;color:var(--ink);">Counter-offers aren't supported yet for orders with more than one product. Message the other side directly to work out pricing.</div>
+    </div>`;
+    return;
+  }
   el.innerHTML = `<div class="spine-inline-action" style="margin-top:8px;">
     <div class="expand-grid" style="grid-template-columns:1fr 1fr;">
       <div class="expand-field"><label>Your counter-price (₱)</label><input type="number" id="negotiatePrice_${id}" value="${po.counter.unitPrice}"></div>
@@ -10960,6 +10982,17 @@ function openCounterForm(id){
   const el = document.getElementById('counterForm_'+id);
   if(el.innerHTML.trim() !== ''){ el.innerHTML = ''; return; }
   const po = getPO(id);
+  // Counter-offers negotiate a single per-unit price (po.counter.unitPrice), applied on accept
+  // to lineItems[0] only — accepting a counter on a multi-item PO would silently leave every
+  // other line item at its original, un-negotiated price while the order moved to "confirmed" as
+  // if it had been fully agreed. Blocking here until this supports a price per line item, rather
+  // than quietly producing a PO whose total doesn't match what either side actually agreed to.
+  if(po.lineItems.length > 1){
+    el.innerHTML = `<div class="spine-inline-action" style="margin-top:8px;">
+      <div style="font-size:15px;color:var(--ink);">Counter-offers aren't supported yet for orders with more than one product — this order has ${po.lineItems.length}. Message the buyer directly to work out pricing, or cancel and re-send as separate single-product orders.</div>
+    </div>`;
+    return;
+  }
   el.innerHTML = `<div class="spine-inline-action" style="margin-top:8px;">
     <div class="expand-grid" style="grid-template-columns:1fr 1fr;">
       <div class="expand-field"><label>Counter unit price (₱)</label><input type="number" id="counterPrice_${id}" value="${po.lineItems[0].unitPrice}"></div>
@@ -16858,7 +16891,14 @@ NiftiDB.activatedAt = null;   // persisted — set once, first time the onboardi
 function capArray(arr, maxLen){
   if(arr.length > maxLen) arr.splice(0, arr.length - maxLen);
 }
-const LOG_CAPS = {analyticsEvents:200, auditLog:300, pushLog:100, notificationsData:80, reminderLog:200, supplierInbox:150, discoveryLeads:100, deletedPriceAgreements:150, importBatches:80, purchaseOrders:250, standingPriceAgreements:200, conversationMessages:250};
+// purchaseOrders and standingPriceAgreements are real business records, not disposable logs —
+// deliberately NOT capped here. They used to be (see trimOversizedBusinessRecords, removed): once
+// either exceeded its cap, the oldest completed/cancelled records were permanently deleted from
+// the only copy that existed for a demo/local session, with no archive and no warning. The actual
+// payload-size risk this was guarding against is heavy embedded attachments, which
+// stripHeavyAssetsForFallbackSave() already strips as a size fallback without deleting any
+// business record at all.
+const LOG_CAPS = {analyticsEvents:200, auditLog:300, pushLog:100, notificationsData:80, reminderLog:200, supplierInbox:150, discoveryLeads:100, deletedPriceAgreements:150, importBatches:80, conversationMessages:250};
 // Every conversation thread grows with normal use (sendMessage, the inline "message from an
 // insight" composer, and the demo's simulated replies all push onto conv.messages) and was the
 // one growing collection nothing here ever capped — every other log had a cap; this one didn't.
@@ -18332,7 +18372,12 @@ function backToConvList(){
    backend this artifact environment can't stand up). What's below is the
    full ceiling of what a client-side artifact can do for persistence.
 ============================================================================ */
-const NIFTI_STORAGE_KEY = 'nifti-app-state-v1';
+// Demo default. A real signed-in business gets its own key (set in loadMyBusinessContext(),
+// below the multi-tenant note above) — without that, every real account on a shared browser
+// would read and overwrite the exact same local blob as every other account and the anonymous
+// demo, which is a real cross-tenant data leak now that this layer actually persists (see
+// niftiStorage above) rather than silently no-opping.
+let NIFTI_STORAGE_KEY = 'nifti-app-state-v1';
 
 // Only the base/source records get saved. Everything in NiftiDB that's derived
 // (skus, skuAliases, skuSupplierLinks, dataQualityIssues, locations) is rebuilt
@@ -18505,18 +18550,6 @@ function noteNiftiStorageUnavailableOnce(){
   console.info('Nifti: no storage available at all in this browser (localStorage is blocked or unsupported — private/incognito mode is the usual cause) — running in-memory only for this session, nothing will survive a reload.');
 }
 let _niftiSaveFailureLogged = false;
-function trimOversizedBusinessRecords(){
-  if(purchaseOrders.length > LOG_CAPS.purchaseOrders){
-    const finished = purchaseOrders.filter(o => o.status==='delivered' || o.status==='cancelled').sort((a,b)=>(a.createdDate||'').localeCompare(b.createdDate||''));
-    const overBy = purchaseOrders.length - LOG_CAPS.purchaseOrders;
-    finished.slice(0, overBy).forEach(o => { const idx = purchaseOrders.indexOf(o); if(idx>=0) purchaseOrders.splice(idx,1); });
-  }
-  if(standingPriceAgreements.length > LOG_CAPS.standingPriceAgreements){
-    const finished = standingPriceAgreements.filter(a => a.status==='cancelled' || a.status==='expired').sort((a,b)=>(a.effectiveDate||'').localeCompare(b.effectiveDate||''));
-    const overBy = standingPriceAgreements.length - LOG_CAPS.standingPriceAgreements;
-    finished.slice(0, overBy).forEach(a => { const idx = standingPriceAgreements.indexOf(a); if(idx>=0) standingPriceAgreements.splice(idx,1); });
-  }
-}
 // Every embedded photo/attachment data URL still on record — delivery/payment proofs, invoice
 // attachments, PO documents, freight milestone photos, the avatar. Image uploads are compressed
 // going forward (see readImageFileCompressed), but a session that already had large ones on file
@@ -18542,7 +18575,6 @@ function stripHeavyAssetsForFallbackSave(state){
 }
 async function saveNiftiStateNow(){
   if(!NIFTI_STORAGE_AVAILABLE){ noteNiftiStorageUnavailableOnce(); return; }
-  trimOversizedBusinessRecords();
   const state = collectNiftiPersistableState();
   let payload;
   try{
@@ -18665,22 +18697,22 @@ async function initNiftiApp(){
     noteNiftiStorageUnavailableOnce();
   }
 }
-// Boots the existing demo-data machinery first (still what every page reads from — see the
-// gap noted in loadMyBusinessContext's caller below), then checks for a real Supabase Auth
-// session. A real session jumps straight to the dashboard under the signed-in account's own
-// identity; with no session, the page falls back to its default state (marketing homepage,
-// login reachable from there) exactly as before this file had real auth.
+// Checks for a real Supabase Auth session FIRST, before the local demo-data machinery boots —
+// loadMyBusinessContext() (when a session exists) sets NIFTI_STORAGE_KEY to this business's own
+// scoped key, so initNiftiApp()'s loadNiftiState() call right after loads that business's own
+// saved copy instead of the shared anonymous demo key. With no session, the page falls back to
+// its default state (marketing homepage, login reachable from there) exactly as before this file
+// had real auth.
 async function bootNifti(){
-  await initNiftiApp();
   const { data: { session } } = await sb.auth.getSession();
-  if(session){
-    const ok = await loadMyBusinessContext();
-    if(ok){
-      await loadRealPurchaseOrders();
-      subscribeToPurchaseOrders();
-      applyRealAccountUI();
-      navigate('dashboard');
-    }
+  let signedIn = false;
+  if(session) signedIn = await loadMyBusinessContext();
+  await initNiftiApp();
+  if(signedIn){
+    await loadRealPurchaseOrders();
+    subscribeToPurchaseOrders();
+    applyRealAccountUI();
+    navigate('dashboard');
   }
 }
 bootNifti();
