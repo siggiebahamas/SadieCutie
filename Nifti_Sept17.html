@@ -322,7 +322,7 @@
   .msg-search{padding:14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;}
   .msg-search svg{width:16px;height:16px;color:var(--ink);flex-shrink:0;}
   .msg-search input{border:none;outline:none;font-family:var(--font-b);font-size:17.5px;width:100%;background:transparent;color:var(--ink);}
-  .msg-filter-chips{display:flex;gap:8px;padding:0 14px 12px;}
+  .msg-filter-chips{display:flex;gap:8px;margin:0 14px 12px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:11px;}
   .msg-conv-list{flex:1;overflow-y:auto;}
   .conv-item{display:flex;gap:10px;padding:13px 14px;cursor:pointer;border-bottom:1px solid var(--border);align-items:flex-start;}
   .conv-item:hover{background:var(--bg);}
@@ -371,7 +371,7 @@
   .msg-composer textarea{flex:1;padding:12px 16px;border:1.5px solid var(--border);border-radius:10px;font-family:var(--font-b);font-size:17.5px;color:var(--ink);resize:none;max-height:120px;line-height:1.4;}
   .msg-filter-bar{display:flex;gap:8px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap;background:var(--bg);}
   .msg-po-tabs{display:flex;gap:6px;flex-wrap:wrap;padding:10px 20px 0;}
-  .msg-po-tab{padding:5px 12px;border-radius:100px;border:1px solid var(--border);background:var(--surface);font-size:15px;font-weight:700;color:var(--ink);cursor:pointer;}
+  .msg-po-tab{padding:5px 12px;border-radius:100px;border:1px solid var(--border);background:var(--bg);font-size:15px;font-weight:700;color:var(--ink);cursor:pointer;}
   .msg-po-tab.active{background:var(--ink);color:#fff;border-color:var(--ink);}
   .msg-po-summary{margin:10px 20px 0;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px;font-size:16px;color:var(--ink);display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 8px rgba(24,26,30,.06);}
   .msg-filter-bar input[type="date"]{padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-family:var(--font-b);font-size:16px;color:var(--ink);}
@@ -525,7 +525,7 @@
   .m-meta.late-text{color:var(--danger);}
   .logi-note{margin-top:18px;padding:14px 16px;background:var(--surface);border-radius:10px;font-size:15.5px;color:var(--body);border:1px solid var(--border);box-shadow:0 2px 8px rgba(24,26,30,.06);}
 
-  .wh-tabs{display:flex;gap:8px;margin-bottom:16px;}
+  .wh-tabs{display:flex;gap:8px;margin-bottom:16px;background:var(--bg);border:1px solid var(--border);border-radius:11px;padding:6px;}
   .wh-tab{padding:8px 16px;border-radius:9px;border:1px solid var(--border);background:var(--surface);font-size:15px;font-weight:700;color:var(--body);cursor:pointer;}
   .wh-tab.active{background:var(--ink);color:#fff;border-color:var(--ink);}
   .bar-wrap{width:130px;height:12px;background:var(--surface);border:1.5px solid var(--ink);border-radius:6px;position:relative;overflow:hidden;box-sizing:border-box;}
@@ -4069,7 +4069,7 @@ async function confirmResetNiftiSavedState(){
     return;
   }
   try{
-    await window.storage.delete(NIFTI_STORAGE_KEY, false);
+    await niftiStorage.delete(NIFTI_STORAGE_KEY);
     if(el) el.innerHTML = `<div style="font-size:15px;color:var(--green);font-weight:700;">Saved data cleared. Reload the page to start fresh.</div>`;
     showToast('Saved data cleared — reload to start fresh.', 'success');
   }catch(e){
@@ -18466,18 +18466,43 @@ function scheduleNiftiSave(){
   _niftiSaveTimer = setTimeout(saveNiftiStateNow, 800);
 }
 // `window.storage` only exists inside a Claude surface that provides it (e.g. viewed as a
-// live Claude artifact/canvas). Opened the ordinary way — a downloaded HTML file, double-clicked
-// or hosted anywhere else — it's simply undefined. That's not an error, it's the expected,
-// normal case for this deliverable, so it's checked ONCE up front rather than discovered by
-// letting every save attempt throw and get caught, which is what was silently spamming the
-// console every ~15 seconds before this: the app still worked, but devtools looked like
-// something was broken when nothing was.
-const NIFTI_STORAGE_AVAILABLE = (typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function' && typeof window.storage.set === 'function');
+// live Claude artifact/canvas) — it's undefined on the real deployed site (GitHub Pages), which
+// is exactly where real signed-up beta users actually open this. That used to mean NOTHING in
+// this whole persistence layer survived a page reload for a real user — not inventory edits, not
+// settings, and critically, every chat message sent by an account not yet wired to Supabase
+// (see sendMessage()/simulateThreadReply() below), since chat has no other durable home yet.
+// That's silent, total data loss on the single most trust-sensitive part of the app, every time
+// a tab closes or refreshes — so this now falls back to real browser localStorage whenever
+// window.storage isn't present, instead of quietly running in-memory-only.
+const NIFTI_LOCALSTORAGE_AVAILABLE = (() => {
+  try{ const k = '__nifti_ls_probe__'; window.localStorage.setItem(k, '1'); window.localStorage.removeItem(k); return true; }
+  catch(e){ return false; } // private-browsing mode, storage disabled, or no localStorage at all
+})();
+const NIFTI_STORAGE_BACKEND = (typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function' && typeof window.storage.set === 'function')
+  ? 'claude' : (NIFTI_LOCALSTORAGE_AVAILABLE ? 'local' : null);
+const NIFTI_STORAGE_AVAILABLE = NIFTI_STORAGE_BACKEND !== null;
+// Same (key, value, silent) / (key, silent) shape as window.storage, so every call site below
+// reads identically regardless of which backend actually ends up serving it.
+const niftiStorage = {
+  async get(key){
+    if(NIFTI_STORAGE_BACKEND === 'claude') return window.storage.get(key, false);
+    const raw = window.localStorage.getItem(key);
+    return raw === null ? null : { value: raw };
+  },
+  async set(key, value){
+    if(NIFTI_STORAGE_BACKEND === 'claude') return window.storage.set(key, value, false);
+    window.localStorage.setItem(key, value); // throws (QuotaExceededError etc.) same as the Claude backend would — callers already handle that
+  },
+  async delete(key){
+    if(NIFTI_STORAGE_BACKEND === 'claude') return window.storage.delete(key, false);
+    window.localStorage.removeItem(key);
+  },
+};
 let _niftiStorageNoticeShown = false;
 function noteNiftiStorageUnavailableOnce(){
   if(_niftiStorageNoticeShown) return;
   _niftiStorageNoticeShown = true;
-  console.info('Nifti: no storage API in this environment — running in-memory only for this session (nothing will survive a reload). Expected when this file is opened directly rather than through a Claude surface that provides window.storage.');
+  console.info('Nifti: no storage available at all in this browser (localStorage is blocked or unsupported — private/incognito mode is the usual cause) — running in-memory only for this session, nothing will survive a reload.');
 }
 let _niftiSaveFailureLogged = false;
 function trimOversizedBusinessRecords(){
@@ -18531,7 +18556,7 @@ async function saveNiftiStateNow(){
   }
   if(payload.length > 3500000) console.warn('Nifti: saved state is now '+(payload.length/1000000).toFixed(2)+'MB — approaching the 5MB storage limit.');
   try{
-    await window.storage.set(NIFTI_STORAGE_KEY, payload, false);
+    await niftiStorage.set(NIFTI_STORAGE_KEY, payload);
     _niftiSaveFailureLogged = false;
     return;
   }catch(e){
@@ -18544,7 +18569,7 @@ async function saveNiftiStateNow(){
     if(strippedCount > 0){
       try{
         const strippedPayload = JSON.stringify(strippedState);
-        await window.storage.set(NIFTI_STORAGE_KEY, strippedPayload, false);
+        await niftiStorage.set(NIFTI_STORAGE_KEY, strippedPayload);
         if(!_niftiSaveFailureLogged){
           _niftiSaveFailureLogged = true;
           console.error('Nifti: the full save (with photos/attachments) failed at '+sizeMB+'MB, but a lighter version without '+strippedCount+' embedded photo/attachment field(s) saved successfully at '+(strippedPayload.length/1000000).toFixed(2)+'MB. Your orders, prices, and statuses are safely saved — only the attached photos/signatures/documents from this session may not survive a reload. Original error: ('+(e && e.message ? e.message : e)+')');
@@ -18571,7 +18596,7 @@ const NIFTI_SCHEMA_VERSION = 2;
 async function loadNiftiState(){
   if(!NIFTI_STORAGE_AVAILABLE){ noteNiftiStorageUnavailableOnce(); return false; }
   try{
-    const res = await window.storage.get(NIFTI_STORAGE_KEY, false);
+    const res = await niftiStorage.get(NIFTI_STORAGE_KEY);
     if(!res || !res.value) return false;
     const parsed = JSON.parse(res.value);
     if(!parsed.v || parsed.v < NIFTI_SCHEMA_VERSION){
