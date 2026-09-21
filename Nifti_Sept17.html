@@ -3281,6 +3281,38 @@ function mapMessageRowToJs(row, myBusinessId){
     attachment: row.attachment || undefined,
   };
 }
+// Replaces suppliersData/buyersData — the "My Suppliers"/"My Buyers" table — with this
+// business's real connections for a signed-in account. .orders/.lastOrder are derived from the
+// already-loaded real purchaseOrders (see loadRealPurchaseOrders(), called first in bootNifti())
+// rather than stored on the relationship row, so they're always live, not a snapshot that drifts.
+// score/tier aren't set at all here — renderSuppliersTable() already computes the displayed
+// reliability live via computeCounterpartReliability()/purchaseOrders, never reads those two
+// fields directly, so there's nothing to fake.
+async function loadMyConnections(){
+  if(!myBusiness) return;
+  const isSupplierRole = myBusiness.type === 'supplier';
+  const col = isSupplierRole ? 'supplier_business_id' : 'buyer_business_id';
+  const { data: relRows, error } = await sb.from('business_relationships').select('*').eq(col, myBusiness.id);
+  if(error || !relRows){ console.warn('Could not load connections:', error && error.message); return; }
+  const myPOs = isSupplierRole ? getSupplierPOs() : getBuyerPOs();
+  const mapped = await Promise.all(relRows.map(async (r) => {
+    const counterpartId = isSupplierRole ? r.buyer_business_id : r.supplier_business_id;
+    const name = (await getBusinessName(counterpartId)) || 'Unknown business';
+    const related = myPOs.filter(o => isSupplierRole ? o.buyerId===counterpartId : o.supplierId===counterpartId);
+    const mostRecent = related.slice().sort((a,b)=>(b.createdDate||'').localeCompare(a.createdDate||''))[0];
+    return {
+      id: counterpartId, name, category: r.category || '',
+      orders: related.length,
+      lastOrder: mostRecent ? otifShortDateLabel(new Date(mostRecent.createdDate+'T00:00:00')) : 'No orders yet',
+      since: r.relationship_since || (r.created_at||'').slice(0,10),
+      preferredContact: r.preferred_contact || '', paymentTerms: r.payment_terms || '',
+      creditLimit: r.credit_limit || null, country: r.country || '', location: r.location || '',
+    };
+  }));
+  const target = isSupplierRole ? buyersData : suppliersData;
+  target.length = 0;
+  target.push(...mapped);
+}
 async function loadMyConversations(){
   if(!myBusiness) return;
   const col = myBusiness.type === 'buyer' ? 'buyer_business_id' : 'supplier_business_id';
@@ -3291,8 +3323,13 @@ async function loadMyConversations(){
     const name = (await getBusinessName(counterpartId)) || 'Unknown business';
     const { data: msgRows } = await sb.from('conversation_messages').select('*').eq('conversation_id', c.id).order('sent_at');
     return {
-      id: c.id, // a real conversation UUID — selectConversation()/activeConvId already just treat conv.id as an opaque key, so this is a drop-in
-      counterpartId,
+      // Every existing chat function (getConvRelatedPOs, messageSupplier, etc.) already treats
+      // conv.id as the COUNTERPART'S business id, not an opaque conversation key — matches the
+      // demo convention where a conversation's id IS the other party's id. conversationRowId
+      // (the real conversations table row) is kept separately for the handful of places that
+      // actually need to address that row (sending a message, marking read, the realtime match).
+      id: counterpartId,
+      conversationRowId: c.id,
       name, category: '',
       initials: name.split(' ').map(w=>w[0]).filter(Boolean).slice(0,2).join('').toUpperCase() || '?',
       unread: myBusiness.type === 'buyer' ? c.buyer_unread_count : c.supplier_unread_count,
@@ -3304,24 +3341,24 @@ async function loadMyConversations(){
   target.push(...mapped);
 }
 async function sendRealMessage(conv, localMsg){
-  if(!myBusiness) return;
+  if(!myBusiness || !conv.conversationRowId) return;
   const poRow = localMsg.poRef ? purchaseOrders.find(p=>p.poNumber===localMsg.poRef) : null;
   try{
     const { error } = await sb.from('conversation_messages').insert({
-      id: localMsg.id, conversation_id: conv.id, sender_business_id: myBusiness.id,
+      id: localMsg.id, conversation_id: conv.conversationRowId, sender_business_id: myBusiness.id,
       text: localMsg.text, po_id: poRow ? poRow.id : null, attachment: localMsg.attachment || null,
     });
     if(error){ console.warn('Message not saved to server:', error.message); return; }
     const target = myBusiness.type === 'buyer' ? 'supplier' : 'buyer';
-    await sb.rpc('increment_conversation_unread', { p_conversation_id: conv.id, p_target: target });
+    await sb.rpc('increment_conversation_unread', { p_conversation_id: conv.conversationRowId, p_target: target });
   }catch(e){ console.warn('Message send failed:', e); }
 }
 // Mirrors the read locally (conv.unread = 0, set in selectConversation()) back to Supabase, so
 // the other side's unread badge for this thread is accurate next time they load their list.
 async function markConversationReadRemote(conv){
-  if(!myBusiness || !conv || typeof conv.id !== 'string' || !conv.id.includes('-')) return; // real conversation ids are UUIDs; demo ids ('metro', etc.) are not
+  if(!myBusiness || !conv || !conv.conversationRowId) return; // demo conversations have no conversationRowId at all
   const col = myBusiness.type === 'buyer' ? 'buyer_unread_count' : 'supplier_unread_count';
-  const { error } = await sb.from('conversations').update({ [col]: 0 }).eq('id', conv.id);
+  const { error } = await sb.from('conversations').update({ [col]: 0 }).eq('id', conv.conversationRowId);
   if(error) console.warn('Could not mark conversation read on server:', error.message);
 }
 let chatRealtimeChannels = [];
@@ -3332,7 +3369,7 @@ function subscribeToConversations(){
   const onMessageChange = (payload) => {
     const row = payload.new;
     if(!row || !row.conversation_id) return;
-    const conv = getConversations().find(c=>c.id===row.conversation_id);
+    const conv = getConversations().find(c=>c.conversationRowId===row.conversation_id);
     if(!conv) return; // a message for a conversation this business isn't part of — RLS already prevents this, defensive only
     const mapped = mapMessageRowToJs(row, myBusiness.id);
     const idx = conv.messages.findIndex(m=>m.id===row.id);
@@ -3345,7 +3382,7 @@ function subscribeToConversations(){
   const onConversationChange = (payload) => {
     const row = payload.new;
     if(!row) return;
-    const conv = getConversations().find(c=>c.id===row.id);
+    const conv = getConversations().find(c=>c.conversationRowId===row.id);
     if(!conv) { loadMyConversations().then(()=>{ renderConversationList(); }); return; } // a brand-new conversation (e.g. an invite just got accepted) — reload the list to pick it up
     conv.unread = myBusiness.type === 'buyer' ? row.buyer_unread_count : row.supplier_unread_count;
     renderConversationList();
@@ -18897,6 +18934,7 @@ async function bootNifti(){
   if(signedIn){
     await loadRealPurchaseOrders();
     subscribeToPurchaseOrders();
+    await loadMyConnections();
     await loadMyConversations();
     subscribeToConversations();
     applyRealAccountUI();
