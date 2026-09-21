@@ -3124,6 +3124,7 @@ async function loadMyBusinessContext(){
   // Whatever bootNifti()/loadNiftiState() already loaded under the demo key before this ran gets
   // replaced below by this business's own saved copy, if it has one.
   NIFTI_STORAGE_KEY = 'nifti-app-state-v1:biz-' + myBusiness.id;
+  APP_TODAY = realTodayDateStr();
   await loadMyTeamRoster();
   await loadMyCustomRoles();
   return true;
@@ -3505,6 +3506,11 @@ function applyRealAccountUI(){
   // demo company name. Blank it so nothing goes out until the user actually enters someone real.
   const supNameEl = document.getElementById('supName'); if(supNameEl) supNameEl.value = '';
   const supEmailEl = document.getElementById('supEmail'); if(supEmailEl) supEmailEl.value = '';
+  // Settings > Business Profile ships with "Dela Cruz Hardware" baked into its HTML value — left
+  // alone, a real account would see the demo name there, and applyAvatarEverywhere() (called on
+  // every avatar upload/removal) reads this same field for fallback initials, so it would also
+  // silently revert a real account's avatar initials back to "DC" the next time a photo changed.
+  const settingsBizNameEl = document.getElementById('settingsBizName'); if(settingsBizNameEl) settingsBizNameEl.value = myBusiness.name;
   if(typeof messageEdited !== 'undefined') messageEdited = false;
   if(document.getElementById('chatPreview')) updatePreview();
   // "Preview either side's metrics" only makes sense for the demo, where one browser session
@@ -3654,8 +3660,14 @@ function exportFullHistory(){
   const msgCount = getConversations().reduce((s,c)=>s+c.messages.length,0);
   document.getElementById('exportHistoryResult').textContent = `✓ Prepared export: ${orderCount} orders, ${msgCount} messages. (In production this downloads a file — that step is stubbed in this prototype.)`;
 }
-function saveBusinessProfile(){
-  const name = document.getElementById('settingsBizName').value;
+async function saveBusinessProfile(){
+  const name = document.getElementById('settingsBizName').value.trim();
+  if(!name) return;
+  if(myBusiness){
+    const { error } = await sb.from('businesses').update({ name }).eq('id', myBusiness.id);
+    if(error){ showToast("Couldn't save that name — try again.", 'error'); return; }
+    myBusiness.name = name;
+  }
   // Update the visible name in the topbar user chip (text node that follows the avatar div)
   document.querySelectorAll('.user-chip').forEach(chip=>{
     chip.childNodes.forEach(node=>{
@@ -5231,12 +5243,23 @@ function autoDraftReorderIfNeeded(item){
 function invSaveEdit(code){
   if(!requirePermission('editInventory')) return;
   const item = inventoryData.find(i=>i.code===code);
+  // `parseInt(...) || item.onHand` used to silently discard a real, legitimate 0 (falsy) and
+  // keep the old value instead — a fresh out-of-stock count would just never save. It also had
+  // no lower bound at all, so a typo like "-5" was accepted as-is and corrupted onHand and the
+  // movement ledger with a negative quantity.
+  const onHandRaw = document.getElementById('editOnHand_'+code).value;
+  const ropRaw = document.getElementById('editRop_'+code).value;
+  const maxRaw = document.getElementById('editMax_'+code).value;
+  const onHandNum = Number(onHandRaw), ropNum = Number(ropRaw), maxNum = Number(maxRaw);
+  if(onHandRaw !== '' && (isNaN(onHandNum) || onHandNum < 0)){ showToast('Please enter a valid on-hand quantity (0 or more).'); return; }
+  if(ropRaw !== '' && (isNaN(ropNum) || ropNum < 0)){ showToast('Please enter a valid reorder point (0 or more).'); return; }
+  if(maxRaw !== '' && (isNaN(maxNum) || maxNum < 0)){ showToast('Please enter a valid max level (0 or more).'); return; }
   const before = {onHand:item.onHand, rop:item.rop, maxLevel:item.maxLevel, warehouse:item.warehouse};
   item.name = document.getElementById('editName_'+code).value;
-  item.onHand = parseInt(document.getElementById('editOnHand_'+code).value) || item.onHand;
+  item.onHand = onHandRaw !== '' ? onHandNum : item.onHand;
   item.warehouse = document.getElementById('editWarehouse_'+code).value || '';
-  item.rop = parseInt(document.getElementById('editRop_'+code).value) || item.rop;
-  item.maxLevel = parseInt(document.getElementById('editMax_'+code).value) || (item.rop*3);
+  item.rop = ropRaw !== '' ? ropNum : item.rop;
+  item.maxLevel = maxRaw !== '' ? maxNum : (item.rop*3);
   item.unit = document.getElementById('editUnit_'+code).value.trim() || '';
   // recompute status from the new on-hand/reorder-point relationship
   if(item.onHand <= item.rop) item.status = 'critical';
@@ -7066,7 +7089,18 @@ function findAgreedPrice(supplierId, productName, qty){
 }
 // Section 5 #14 — flag a catalog price if it hasn't been reconfirmed in 30+ days.
 const CATALOG_PRICE_STALE_DAYS = 30;
-const APP_TODAY = '2026-08-26';
+// '2026-08-26' is a fixed "today" so the demo's seed data stays internally consistent. For a
+// real signed-in account this gets overwritten with the actual real date (see
+// loadMyBusinessContext) — every one of this file's ~130 uses of APP_TODAY (order history
+// timestamps, invoice due/paid dates, delivery confirmations, stocktake logs, subscription
+// dates, and more) otherwise silently stamped every real action with 2026-08-26 regardless of
+// when it actually happened, which both looked wrong to a real user and corrupted any duration
+// math that diffs two dates on the same record (e.g. order-placed-to-shipped fulfillment speed).
+let APP_TODAY = '2026-08-26';
+function realTodayDateStr(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
 // ---- Performance trend, not just a snapshot ----
 // Individual reliability signals already exist, but nothing ever compared "how is this
 // relationship trending" — the same 85% on-time rate could mean steadily improving or quietly
@@ -7900,6 +7934,7 @@ function refreshSaleTotalsPreview(){
   el.textContent = `Total: ${fmtPHP(total)}  ·  Est. profit: ${fmtPHP(total-cost)}`;
 }
 function submitRecordSale(){
+  if(!requirePermission('editInventory')) return;
   const customerId = document.getElementById('saleCustomer').value;
   if(!customerId){ markFieldInvalid('saleCustomer', 'Please select a customer.'); return; }
   const date = document.getElementById('saleDate').value || APP_TODAY;
@@ -7947,11 +7982,14 @@ function openRecordSalePaymentForm(saleId){
   </div>`;
 }
 function submitSalePayment(saleId){
+  if(!requirePermission('editInventory')) return;
   const sale = downstreamSales.find(s=>s.id===saleId);
   if(!sale) return;
   const amount = Number(document.getElementById('salePayAmt_'+saleId).value);
   const method = document.getElementById('salePayMethod_'+saleId).value;
   if(!amount || amount<=0) return;
+  const balance = computeSaleBalance(sale);
+  if(amount > balance + 0.5){ showToast(`That's more than the ${fmtPHP(balance)} still owed on this sale.`); return; }
   sale.payments.push({method, amount, date:APP_TODAY});
   renderSalesPage();
   showToast('Payment recorded.', 'success');
@@ -12429,7 +12467,7 @@ async function sendRfq(){
     const { data, error } = await sb.from('rfqs').insert({
       buyer_business_id: myBusiness.id, supplier_business_id: supplierId,
       items:[{product, qty}], needed_by_date: neededBy, notes, status:'sent',
-      history:[{date: new Date().toISOString().slice(0,10), time:'Just now', actor:'buyer', action:'RFQ sent'}],
+      history:[{date: APP_TODAY, time:'Just now', actor:'buyer', action:'RFQ sent'}],
     }).select().single();
     if(error){ showToast("Couldn't send that RFQ — try again.", 'error'); return; }
     rfqs.push(await mapRfqRowToJs(data));
@@ -12465,7 +12503,7 @@ async function submitQuote(id){
   if(!valid){ showToast('Please select a validity date for this quote.'); return; }
   const quote = {unitPrice:price, leadTimeDays:lead, validUntil:valid, note};
   const historyEntry = myBusiness
-    ? {date: new Date().toISOString().slice(0,10), time:'Just now', actor:'supplier', action:'Quote submitted'}
+    ? {date: APP_TODAY, time:'Just now', actor:'supplier', action:'Quote submitted'}
     : {date:'2026-08-26', time:'11:00 AM', actor:'supplier', action:'Quote submitted'};
   const newHistory = [...rfq.history, historyEntry];
   if(myBusiness){
@@ -12480,7 +12518,7 @@ async function submitQuote(id){
 }
 async function acceptRfqQuote(id){
   const rfq = rfqs.find(r=>r.id===id);
-  const today = myBusiness ? new Date().toISOString().slice(0,10) : '2026-08-26';
+  const today = APP_TODAY;
   const historyEntry = {date: today, time: myBusiness ? 'Just now' : '11:30 AM', actor:'buyer', action:'Quote accepted'};
   const newHistory = [...rfq.history, historyEntry];
   if(myBusiness){
@@ -12508,7 +12546,7 @@ async function acceptRfqQuote(id){
 async function declineRfqQuote(id){
   const rfq = rfqs.find(r=>r.id===id);
   const historyEntry = myBusiness
-    ? {date: new Date().toISOString().slice(0,10), time:'Just now', actor:'buyer', action:'Quote declined'}
+    ? {date: APP_TODAY, time:'Just now', actor:'buyer', action:'Quote declined'}
     : {date:'2026-08-26', time:'1:15 PM', actor:'buyer', action:'Quote declined'};
   const newHistory = [...rfq.history, historyEntry];
   if(myBusiness){
@@ -13484,15 +13522,78 @@ function submitSpineSplit(id){
   }
   if(btn) btn.textContent = 'Update split request →';
 }
+// Orders whose createdDate falls in the real calendar month N months before the current real
+// month (0 = this month, 1 = last month, 3/6 = three/six months ago). Used only for real
+// accounts — the demo's own "this month" figures stay the simple all-time count they always were.
+function ordersInRealMonthOffset(orders, monthsAgo){
+  const today = new Date();
+  const target = new Date(today.getFullYear(), today.getMonth()-monthsAgo, 1);
+  return orders.filter(o=>{
+    if(!o.createdDate) return false;
+    const d = new Date(o.createdDate+'T00:00:00');
+    return d.getFullYear()===target.getFullYear() && d.getMonth()===target.getMonth();
+  });
+}
+// A real comparison needs a real prior period to compare against — a brand-new real account (or
+// one that simply didn't order anything 3/6 months ago) has no such period, so this says so
+// honestly instead of dividing by zero or showing a delta against a period that never happened.
+function realMonthDeltaText(current, prior, opts){
+  if(!prior) return 'Not enough history to compare yet';
+  const diff = current - prior;
+  if(opts.percent){
+    const pct = Math.round((diff/prior)*100);
+    return pct===0 ? 'steady' : (pct>0?'+':'')+pct+'% '+opts.suffix;
+  }
+  if(diff===0) return 'steady';
+  const sign = diff>0?'+':'-';
+  const abs = opts.money ? fmtPHP(Math.round(Math.abs(diff))) : Math.abs(diff)+(opts.unit?' '+opts.unit:'');
+  return sign+abs+' '+opts.suffix;
+}
 function syncAnalyticsMetricsWithRealData(){
   const buyerActive = getBuyerPOs().filter(o=>o.status!=='draft' && o.status!=='cancelled');
   const totalSpendNum = buyerActive.reduce((s,o)=>s+poTotal(o),0);
-  const m1 = ALL_BUYER_METRICS.find(m=>m.id==='totalorders'); if(m1) m1.v = String(buyerActive.length);
+  const m1 = ALL_BUYER_METRICS.find(m=>m.id==='totalorders');
   const m2 = ALL_BUYER_METRICS.find(m=>m.id==='activesuppliers'); if(m2) m2.v = String(suppliersData.length);
-  const m3 = ALL_BUYER_METRICS.find(m=>m.id==='totalspend'); if(m3) m3.v = fmtPHP(totalSpendNum);
-  const m4 = ALL_BUYER_METRICS.find(m=>m.id==='avgordervalue'); if(m4) m4.v = buyerActive.length ? fmtPHP(totalSpendNum/buyerActive.length) : '₱0';
+  const m3 = ALL_BUYER_METRICS.find(m=>m.id==='totalspend');
+  const m4 = ALL_BUYER_METRICS.find(m=>m.id==='avgordervalue');
   const m5 = ALL_BUYER_METRICS.find(m=>m.id==='pendingdeliveries'); if(m5) m5.v = String(buyerActive.filter(o=>['confirmed','preparing','shipped','in_customs'].includes(o.status)).length);
   const m6 = ALL_BUYER_METRICS.find(m=>m.id==='outofstock'); if(m6) m6.v = String(inventoryData.filter(i=>i.onHand===0).length);
+  if(myBusiness){
+    // "Total Orders This Month"/"Total Spend"/"Average Order Value" all say "this month" in their
+    // own label or description, but were computed from ALL-TIME orders — a real account open for
+    // a year would see a "this month" figure that was actually its entire history. Below: the
+    // same three metrics, actually scoped to the real calendar month, with real vs-last/3/6-
+    // months-ago deltas instead of the demo's fixed comparison text.
+    const thisMo = ordersInRealMonthOffset(buyerActive, 0), lastMo = ordersInRealMonthOffset(buyerActive, 1);
+    const mo3 = ordersInRealMonthOffset(buyerActive, 3), mo6 = ordersInRealMonthOffset(buyerActive, 6);
+    if(m1){
+      m1.v = String(thisMo.length);
+      m1.d = realMonthDeltaText(thisMo.length, lastMo.length, {suffix:'vs last month'});
+      m1.d3 = realMonthDeltaText(thisMo.length, mo3.length, {suffix:'vs 3 months ago'}); m1.d3Real = true;
+      m1.d6 = realMonthDeltaText(thisMo.length, mo6.length, {suffix:'vs 6 months ago'}); m1.d6Real = true;
+    }
+    if(m2){ m2.d = 'currently connected'; m2.d3 = 'currently connected'; m2.d6 = 'currently connected'; m2.d3Real = true; m2.d6Real = true; }
+    const thisSpend = thisMo.reduce((s,o)=>s+poTotal(o),0), lastSpend = lastMo.reduce((s,o)=>s+poTotal(o),0);
+    const spend3 = mo3.reduce((s,o)=>s+poTotal(o),0), spend6 = mo6.reduce((s,o)=>s+poTotal(o),0);
+    if(m3){
+      m3.v = fmtPHP(thisSpend);
+      m3.d = realMonthDeltaText(thisSpend, lastSpend, {percent:true, suffix:'vs last month'});
+      m3.d3 = realMonthDeltaText(thisSpend, spend3, {percent:true, suffix:'vs 3 months ago'}); m3.d3Real = true;
+      m3.d6 = realMonthDeltaText(thisSpend, spend6, {percent:true, suffix:'vs 6 months ago'}); m3.d6Real = true;
+    }
+    if(m4){
+      const thisAvg = thisMo.length ? thisSpend/thisMo.length : 0, lastAvg = lastMo.length ? lastSpend/lastMo.length : 0;
+      const avg3 = mo3.length ? spend3/mo3.length : 0, avg6 = mo6.length ? spend6/mo6.length : 0;
+      m4.v = thisMo.length ? fmtPHP(thisAvg) : '₱0';
+      m4.d = realMonthDeltaText(thisAvg, lastAvg, {money:true, suffix:'vs last month'});
+      m4.d3 = realMonthDeltaText(thisAvg, avg3, {money:true, suffix:'vs 3 months ago'}); m4.d3Real = true;
+      m4.d6 = realMonthDeltaText(thisAvg, avg6, {money:true, suffix:'vs 6 months ago'}); m4.d6Real = true;
+    }
+  } else {
+    if(m1) m1.v = String(buyerActive.length);
+    if(m3) m3.v = fmtPHP(totalSpendNum);
+    if(m4) m4.v = buyerActive.length ? fmtPHP(totalSpendNum/buyerActive.length) : '₱0';
+  }
 
   // The eight metrics shown by default were never wired to real data at all — permanently fixed
   // numbers regardless of anything that actually happened in the app. Computed from real order
@@ -13540,10 +13641,50 @@ function syncAnalyticsMetricsWithRealData(){
   const supplierActive = getSupplierPOs().filter(o=>o.status!=='draft' && o.status!=='cancelled');
   const revenueNum = supplierActive.filter(poIsDelivered).reduce((s,o)=>s+poTotal(o),0);
   const s1 = ALL_SUPPLIER_METRICS.find(m=>m.id==='ontime'); if(s1) s1.v = computeFulfillmentMetrics().otif + '%';
-  const s2 = ALL_SUPPLIER_METRICS.find(m=>m.id==='revenue'); if(s2) s2.v = fmtPHP(revenueNum);
+  const s2 = ALL_SUPPLIER_METRICS.find(m=>m.id==='revenue');
   const s3 = ALL_SUPPLIER_METRICS.find(m=>m.id==='activebuyers'); if(s3){ s3.v = String(new Set(supplierActive.map(o=>o.buyerId)).size); }
-  const s4 = ALL_SUPPLIER_METRICS.find(m=>m.id==='ordersmonth'); if(s4) s4.v = String(supplierActive.length);
-  const s5 = ALL_SUPPLIER_METRICS.find(m=>m.id==='avgordervaluesup'); if(s5) s5.v = supplierActive.length ? fmtPHP(supplierActive.reduce((s,o)=>s+poTotal(o),0)/supplierActive.length) : '₱0';
+  const s4 = ALL_SUPPLIER_METRICS.find(m=>m.id==='ordersmonth');
+  const s5 = ALL_SUPPLIER_METRICS.find(m=>m.id==='avgordervaluesup');
+  const s10 = ALL_SUPPLIER_METRICS.find(m=>m.id==='avgresponse');
+  if(myBusiness){
+    // Same "This Month"/"MTD" mismatch as the buyer side — Revenue MTD, Orders This Month, and
+    // Avg Order Value were all-time totals despite their own labels.
+    const thisMoS = ordersInRealMonthOffset(supplierActive, 0), lastMoS = ordersInRealMonthOffset(supplierActive, 1);
+    const mo3S = ordersInRealMonthOffset(supplierActive, 3), mo6S = ordersInRealMonthOffset(supplierActive, 6);
+    const thisRev = thisMoS.filter(poIsDelivered).reduce((s,o)=>s+poTotal(o),0), lastRev = lastMoS.filter(poIsDelivered).reduce((s,o)=>s+poTotal(o),0);
+    const rev3 = mo3S.filter(poIsDelivered).reduce((s,o)=>s+poTotal(o),0), rev6 = mo6S.filter(poIsDelivered).reduce((s,o)=>s+poTotal(o),0);
+    if(s2){
+      s2.v = fmtPHP(thisRev);
+      s2.d = realMonthDeltaText(thisRev, lastRev, {percent:true, suffix:'vs last month'});
+      s2.d3 = realMonthDeltaText(thisRev, rev3, {percent:true, suffix:'vs 3 months ago'}); s2.d3Real = true;
+      s2.d6 = realMonthDeltaText(thisRev, rev6, {percent:true, suffix:'vs 6 months ago'}); s2.d6Real = true;
+    }
+    if(s3){ s3.d = 'currently connected'; s3.d3 = 'currently connected'; s3.d6 = 'currently connected'; s3.d3Real = true; s3.d6Real = true; }
+    if(s4){
+      s4.v = String(thisMoS.length);
+      s4.d = realMonthDeltaText(thisMoS.length, lastMoS.length, {suffix:'vs last month'});
+      s4.d3 = realMonthDeltaText(thisMoS.length, mo3S.length, {suffix:'vs 3 months ago'}); s4.d3Real = true;
+      s4.d6 = realMonthDeltaText(thisMoS.length, mo6S.length, {suffix:'vs 6 months ago'}); s4.d6Real = true;
+    }
+    if(s5){
+      const thisTotal = thisMoS.reduce((s,o)=>s+poTotal(o),0), lastTotal = lastMoS.reduce((s,o)=>s+poTotal(o),0);
+      const total3 = mo3S.reduce((s,o)=>s+poTotal(o),0), total6 = mo6S.reduce((s,o)=>s+poTotal(o),0);
+      const thisAvg = thisMoS.length ? thisTotal/thisMoS.length : 0, lastAvg = lastMoS.length ? lastTotal/lastMoS.length : 0;
+      const avg3 = mo3S.length ? total3/mo3S.length : 0, avg6 = mo6S.length ? total6/mo6S.length : 0;
+      s5.v = thisMoS.length ? fmtPHP(thisAvg) : '₱0';
+      s5.d = realMonthDeltaText(thisAvg, lastAvg, {money:true, suffix:'vs last month'});
+      s5.d3 = realMonthDeltaText(thisAvg, avg3, {money:true, suffix:'vs 3 months ago'}); s5.d3Real = true;
+      s5.d6 = realMonthDeltaText(thisAvg, avg6, {money:true, suffix:'vs 6 months ago'}); s5.d6Real = true;
+    }
+    // This app has no reliable "when did I confirm this order" timestamp captured for real
+    // accounts (order history entries carry a date, not a real clock time) — rather than keep
+    // showing the demo's fixed "2.4 hrs", say plainly this isn't measured yet.
+    if(s10){ s10.v = '—'; s10.d = 'Not tracked yet'; s10.d3 = 'Not tracked yet'; s10.d6 = 'Not tracked yet'; s10.d3Real = true; s10.d6Real = true; }
+  } else {
+    if(s2) s2.v = fmtPHP(revenueNum);
+    if(s4) s4.v = String(supplierActive.length);
+    if(s5) s5.v = supplierActive.length ? fmtPHP(supplierActive.reduce((s,o)=>s+poTotal(o),0)/supplierActive.length) : '₱0';
+  }
 
   // Same fix, supplier side — repeat orders, fulfillment speed, defect rate, and payment delay
   // were all static too, despite every one of them being genuinely computable from real order,
@@ -13601,6 +13742,21 @@ function getDeltaForRange(k){
   // Metrics without d3/d6 variants aren't framed as time comparisons at all (snapshots, policy settings) — always fixed
   if(!k.d3 && !k.d6) return k.d;
   if(kpiCompareRange === 'lastmonth') return k.d;
+  // A real account only gets a real number here for the handful of metrics
+  // syncAnalyticsMetricsWithRealData actually computed a genuine 3-/6-month-ago comparison for
+  // (marked d3Real/d6Real) — every other metric would otherwise still be showing this file's
+  // fixed demo comparison text (e.g. "-5.8 vs 3 months ago" on a two-week-old real account).
+  if(myBusiness){
+    if(kpiCompareRange === '3months') return k.d3Real ? k.d3 : 'Not enough history to compare yet';
+    if(kpiCompareRange === '6months') return k.d6Real ? k.d6 : 'Not enough history to compare yet';
+    if(kpiCompareRange === 'custom'){
+      const fromVal = document.getElementById('kpiCustomFrom').value;
+      const toVal = document.getElementById('kpiCustomTo').value;
+      if(!fromVal || !toVal) return k.d;
+      return 'Not enough history to compare yet';
+    }
+    return k.d;
+  }
   if(kpiCompareRange === '3months') return k.d3;
   if(kpiCompareRange === '6months') return k.d6;
   if(kpiCompareRange === 'custom'){
@@ -16877,7 +17033,12 @@ function validateImportInvMapping(){
   const s = _invImportState;
   const missing = INVENTORY_IMPORT_FIELDS.filter(f=>f.required && (s.mapping[f.key]===undefined || s.mapping[f.key]===-1));
   if(missing.length){ showToast(`Map a column for: ${missing.map(f=>f.label).join(', ')}.`, 'error'); return; }
-  s.parsedRows = s.dataRows.map((cells, idx) => validateImportRow(cells, s.mapping, idx));
+  // validateImportRow only ever checks a row against inventoryData as it existed BEFORE this
+  // import — two rows in the same file for the same product both matched as "new," so a CSV
+  // with a repeated product name created two separate SKUs for it instead of one. seenNames
+  // catches that across rows in this same pass.
+  const seenNames = new Map();
+  s.parsedRows = s.dataRows.map((cells, idx) => validateImportRow(cells, s.mapping, idx, seenNames));
   renderImportInvStep_preview();
 }
 function getMappedCell(cells, mapping, key){
@@ -16888,7 +17049,7 @@ function getMappedCell(cells, mapping, key){
 // Real per-row validation + duplicate detection — reuses the same normalized/token-subset name
 // matching Phase 5 built for SKU dedup (normalizeSkuName/tokenSubsetScore) rather than a second,
 // separately-tuned similarity check that could disagree with it.
-function validateImportRow(cells, mapping, rowIndex){
+function validateImportRow(cells, mapping, rowIndex, seenNames){
   const name = getMappedCell(cells, mapping, 'name');
   const onHandRaw = getMappedCell(cells, mapping, 'onHand');
   const unit = getMappedCell(cells, mapping, 'unit');
@@ -16898,6 +17059,11 @@ function validateImportRow(cells, mapping, rowIndex){
 
   const errors = [];
   if(!name) errors.push('Missing product name');
+  if(name && seenNames){
+    const norm = normalizeSkuName(name);
+    if(seenNames.has(norm)) errors.push(`Duplicate of row ${seenNames.get(norm)+1} in this file`);
+    else seenNames.set(norm, rowIndex);
+  }
   const onHand = Number(onHandRaw);
   if(onHandRaw === '' || isNaN(onHand) || onHand < 0) errors.push('On-hand quantity must be a number ≥ 0');
   const rop = ropRaw === '' ? null : Number(ropRaw);
