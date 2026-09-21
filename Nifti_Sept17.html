@@ -3248,6 +3248,7 @@ async function mapPoRowToJs(row){
     rma: row.rma, assignment: row.assignment, depositPayments: row.deposit_payments,
     codPayment: row.cod_payment, salesInvoiceRecord: row.sales_invoice_record, amendments: row.amendments,
     backorderPoId: row.backorder_po_id, replacesPoId: row.replaces_po_id, backorderFromPoId: row.backorder_from_po_id,
+    freightMilestones: row.freight_milestones || undefined,
   };
 }
 
@@ -3267,6 +3268,7 @@ function mapPoJsToRow(po){
     rma: po.rma || null, assignment: po.assignment || null, deposit_payments: po.depositPayments || null,
     cod_payment: po.codPayment || null, sales_invoice_record: po.salesInvoiceRecord || null, amendments: po.amendments || null,
     backorder_po_id: po.backorderPoId || null, replaces_po_id: po.replacesPoId || null, backorder_from_po_id: po.backorderFromPoId || null,
+    freight_milestones: po.freightMilestones || null,
   };
 }
 
@@ -3335,6 +3337,35 @@ async function loadRealPurchaseOrders(){
 // Two subscriptions, not one — Realtime filters can't express "buyer OR supplier" across two
 // columns in a single filter, so each side of a relationship gets its own channel.
 let poRealtimeChannels = [];
+// Every existing pushSupplierInboxItem/pushBuyerInboxItem call site elsewhere in this file is
+// gated by po.supplierId===ME_SUPPLIER / po.buyerId===ME_BUYER — the demo-era idiom for "the
+// acting account already knows what it just did," simulating both personas in one browser tab.
+// Those globals only ever equal the ACTING account's own id (see loadMyBusinessContext), so for
+// two real, separate businesses those calls can only ever fire in the account that just made the
+// change — the real counterparty, on their own separate session, never got a Dashboard inbox
+// entry for a new order, counter-offer, RMA, invoice, or freight update; only the generic nav
+// "Open Items" badge updated for them, live, with no context on what actually changed.
+// This is the one place that closes that gap: it reads the newest history entry's `actor` (every
+// PO mutation logs one via poLogHistory, and it's always 'buyer' or 'supplier') to tell "the OTHER
+// party just did this" apart from "I just did this myself, in this tab or another one of mine" —
+// the latter already has its own local inbox item from the point of action and shouldn't double up.
+function notifyPoRealtimeChange(po, isNewToMe){
+  const myRole = myBusiness.type; // 'buyer' | 'supplier'
+  const last = (po.history||[])[po.history.length-1];
+  if(!last || last.actor === myRole) return; // no history yet, or this change is my own
+  if(po.supplierId === myBusiness.id){
+    if(po.status === 'draft') return; // the buyer hasn't actually sent it yet — RLS lets a supplier see a draft row exist, but there's nothing to react to until it's sent
+    // Deliberately NOT type:'purchase'/'split'/'negotiation'/'confirm' — renderSupplierInbox gives
+    // those an Accept/Decline (or similar) button wired to resolveSupplierInboxItem, which is
+    // purely cosmetic (just marks the inbox item resolved with fixed text) and never touches the
+    // real PO at all. For a real account that would be a false "you've confirmed this" — omitting
+    // `type` falls through to the plain poId-based "View PO →" link instead, which sends the
+    // supplier to Orders & Freight to take the actual, real action there.
+    pushSupplierInboxItem({title: (isNewToMe ? 'New purchase order — ' : po.poNumber+' — ')+(isNewToMe ? po.poNumber : last.action), meta: last.action, poId: po.id});
+  } else if(po.buyerId === myBusiness.id){
+    pushBuyerInboxItem({title: po.poNumber+' — '+last.action, meta: last.action, pillLabel:'Update', pillClass:'pill-info', poId: po.id});
+  }
+}
 function subscribeToPurchaseOrders(){
   if(!myBusiness) return;
   poRealtimeChannels.forEach(ch => sb.removeChannel(ch));
@@ -3348,6 +3379,7 @@ function subscribeToPurchaseOrders(){
     } else {
       const mapped = await mapPoRowToJs(payload.new);
       if(idx>-1) purchaseOrders[idx] = mapped; else purchaseOrders.push(mapped);
+      notifyPoRealtimeChange(mapped, idx===-1);
     }
     if(document.getElementById('orderRows')) renderOrdersTable();
     if(document.getElementById('supplierOrderRows')) renderSupplierOrdersTable();
@@ -3821,6 +3853,11 @@ function exportFullHistory(){
   document.getElementById('exportHistoryResult').textContent = `✓ Prepared export: ${orderCount} orders, ${msgCount} messages. (In production this downloads a file — that step is stubbed in this prototype.)`;
 }
 async function saveBusinessProfile(){
+  // Every other Owner-level Settings mutation checks this (deactivateAccount → manageAccount,
+  // saveTeamMember/removeTeamMember → manageTeam, saveEditedRoles → manageRoles); renaming the
+  // registered business had no check at all, so a team member on a custom role scoped only to the
+  // settings page (built-in non-Owner/GM roles don't get that page at all) could rename it freely.
+  if(!requirePermission('manageAccount')) return;
   const name = document.getElementById('settingsBizName').value.trim();
   if(!name) return;
   if(myBusiness){
@@ -3889,6 +3926,7 @@ function renderTaxProfileSettings(){
   });
 }
 function saveTaxProfile(){
+  if(!requirePermission('manageAccount')) return; // same reasoning as saveBusinessProfile — this edits BIR-relevant TIN/RDO/ATP fields, an Owner-level concern with no prior check at all
   const p = getMyTaxProfile();
   p.businessName = document.getElementById('taxBizName').value.trim() || p.businessName;
   p.tin = document.getElementById('taxTin').value.trim();
@@ -3906,10 +3944,24 @@ function saveTaxProfile(){
 }
 // Gap: there was no way to manage the actual login email or password anywhere in the app —
 // only the business-facing "Contact email" existed.
-function saveLoginEmail(){
+async function saveLoginEmail(){
   const email = document.getElementById('settingsLoginEmail').value.trim();
   if(!email || !email.includes('@')){ showToast('Please enter a valid email address.'); return; }
   const confirmEl = document.getElementById('loginEmailConfirm');
+  // For a real account this used to just say "✓ Saved" with no call to Supabase Auth at all —
+  // the login email never actually changed. Now actually calls updateUser(); Supabase's default
+  // flow requires confirming the change via a link sent to the new address before it takes
+  // effect, so "Saved" would still have been false even with the call wired up.
+  if(myBusiness){
+    confirmEl.style.color = '';
+    confirmEl.textContent = 'Saving…';
+    const { error } = await sb.auth.updateUser({ email });
+    if(error){ confirmEl.style.color = 'var(--danger)'; confirmEl.textContent = "Couldn't update — try again."; return; }
+    confirmEl.style.color = 'var(--green)';
+    confirmEl.textContent = '✓ Confirmation link sent to '+email;
+    setTimeout(()=>{ confirmEl.textContent=''; confirmEl.style.color=''; }, 6000);
+    return;
+  }
   confirmEl.textContent = '✓ Saved';
   setTimeout(()=>{ confirmEl.textContent=''; }, 2500);
 }
@@ -3924,14 +3976,32 @@ function openPasswordChangeForm(){
     <span id="pwChangeConfirm" style="margin-left:12px;font-size:15px;font-weight:700;color:var(--green);"></span>
   `;
 }
-function submitPasswordChange(){
+async function submitPasswordChange(){
   const current = document.getElementById('pwCurrent').value;
   const next = document.getElementById('pwNew').value;
   const confirm = document.getElementById('pwConfirm').value;
   if(!current){ showToast('Please enter your current password.'); return; }
   if(next.length < 8){ showToast('New password must be at least 8 characters.'); return; }
   if(next !== confirm){ showToast("New password and confirmation don't match."); return; }
-  document.getElementById('pwChangeConfirm').textContent = '✓ Password updated';
+  const confirmEl = document.getElementById('pwChangeConfirm');
+  // For a real account this used to just say "✓ Password updated" unconditionally, with zero call
+  // to Supabase Auth — the password never actually changed, and "current password" was collected
+  // but never validated against anything. Now re-authenticates with it first (confirming it's
+  // actually correct) before calling updateUser() with the new one.
+  if(myBusiness){
+    confirmEl.style.color = '';
+    confirmEl.textContent = 'Updating…';
+    const { data: userData } = await sb.auth.getUser();
+    const email = userData && userData.user && userData.user.email;
+    const { error: reauthError } = await sb.auth.signInWithPassword({ email, password: current });
+    if(reauthError){ confirmEl.style.color = 'var(--danger)'; confirmEl.textContent = 'Current password is incorrect.'; return; }
+    const { error } = await sb.auth.updateUser({ password: next });
+    if(error){ confirmEl.style.color = 'var(--danger)'; confirmEl.textContent = "Couldn't update your password — try again."; return; }
+    confirmEl.style.color = 'var(--green)';
+    confirmEl.textContent = '✓ Password updated';
+  } else {
+    confirmEl.textContent = '✓ Password updated';
+  }
   document.getElementById('pwCurrent').value = '';
   document.getElementById('pwNew').value = '';
   document.getElementById('pwConfirm').value = '';
@@ -7089,7 +7159,21 @@ function editPaymentTerms(partyId){
     <button class="btn btn-primary" style="padding:7px 14px;font-size:15px;" onclick="event.stopPropagation(); savePaymentTerms('${partyId}')">Save →</button>
   </div>`;
 }
-function savePaymentTerms(partyId){
+// Both write to business_relationships, which loadMyConnections() already reads credit_limit/
+// payment_terms FROM — the read path was real, but there was no write path at all: saveCreditLimit/
+// savePaymentTerms only ever mutated the local buyersData/suppliersData copy and called
+// scheduleNiftiSave() (this browser's own localStorage). subscribeToBusinessRelationships() calls
+// loadMyConnections() on ANY change to this table (including one this same account made elsewhere,
+// e.g. a name/category edit), which wholesale-rebuilds buyersData/suppliersData from the DB — so an
+// edit made here was silently discarded the moment that next refresh happened, and the counterparty
+// never received it in the first place since nothing was ever actually sent to Supabase.
+async function syncBusinessRelationshipField(buyerId, supplierId, field, value){
+  if(!myBusiness) return true;
+  const { error } = await sb.from('business_relationships').update({ [field]: value }).eq('buyer_business_id', buyerId).eq('supplier_business_id', supplierId);
+  if(error){ console.warn('business_relationships sync failed for', field, '—', error.message); return false; }
+  return true;
+}
+async function savePaymentTerms(partyId){
   const isSupplierRole = currentAppRole === 'supplier';
   const dataset = isSupplierRole ? buyersData : suppliersData;
   const party = dataset.find(p=>p.id===partyId);
@@ -7100,6 +7184,13 @@ function savePaymentTerms(partyId){
   if(oldVal !== val) logAudit('manual_override', 'supplier', partyId, 'paymentTerms', oldVal, val);
   document.getElementById('paymentTermsForm_'+partyId).innerHTML = '';
   renderSuppliersTable();
+  if(myBusiness){
+    const buyerId = isSupplierRole ? partyId : myBusiness.id;
+    const supplierId = isSupplierRole ? myBusiness.id : partyId;
+    if(!(await syncBusinessRelationshipField(buyerId, supplierId, 'payment_terms', val))){
+      showToast("Payment terms couldn't be saved — try again.", 'error');
+    }
+  }
 }
 // ---- Credit limit (supplier-granted, enforced when the buyer tries to send a new order) ----
 // Only ever settable from the supplier side — a buyer doesn't grant themselves credit. Shown to
@@ -7149,7 +7240,7 @@ function editCreditLimit(partyId){
     <button class="btn btn-primary" style="padding:7px 14px;font-size:15px;" onclick="event.stopPropagation(); saveCreditLimit('${partyId}')">Save →</button>
   </div>`;
 }
-function saveCreditLimit(partyId){
+async function saveCreditLimit(partyId){
   const party = buyersData.find(p=>p.id===partyId);
   const raw = document.getElementById('creditLimitInput_'+partyId).value.trim();
   const val = raw ? Number(raw) : null;
@@ -7161,6 +7252,11 @@ function saveCreditLimit(partyId){
   renderSuppliersTable();
   showToast(val ? `Credit limit set to ${fmtPHP(val)}.` : 'Credit limit removed.', 'success');
   scheduleNiftiSave();
+  // Only ever called from the supplier side (see the comment above renderCreditLimitRow) — partyId
+  // is the buyer, myBusiness is the supplier granting the limit.
+  if(myBusiness && !(await syncBusinessRelationshipField(partyId, myBusiness.id, 'credit_limit', val))){
+    showToast("Credit limit couldn't be saved to your account — the buyer won't see this limit yet. Try again.", 'error');
+  }
 }
 // Section 7 #15 — Payment Status: a read-only filtered view of existing order/invoice data,
 // organized by what's owed. Never a general ledger or bookkeeping engine.
@@ -9548,6 +9644,7 @@ function submitRmaReplacement(id){
     history:[{date:APP_TODAY, time:'Just now', actor:'supplier', action:'Created as a no-charge replacement for '+po.poNumber}],
   };
   purchaseOrders.push(replacementPO);
+  syncPoToSupabase(replacementPO); // this is a brand-new order, not a change to `po` — poLogHistory below only syncs `po` itself
   snapshotPO(po);
   po._undoLabel = 'Replacement order created.';
   po.rma.status = 'resolved';
@@ -10748,6 +10845,11 @@ function handlePaymentResultHash(){
   if(po) openOrderDetailModal(po.id, false); // whoever completes a checkout here is definitionally the buyer (create-gcash-payment/create-maya-payment both reject anyone else)
 }
 async function startGcashPayment(id, btn){
+  // Every other real-money action in this app (submitRecordPayment, submitRmaCreditNote, the COD
+  // and past-due mark-paid paths) requires markInvoicePaid; kicking off a real PayMongo checkout
+  // is the same category of action and had no permission check at all, letting any team member —
+  // not just Owner/GM/Finance — trigger it from renderPaymentPanel's buyer-gated block.
+  if(!requirePermission('markInvoicePaid')) return;
   // Guards against a double-click firing two payment intents for the same invoice before the
   // first request even resolves -- there was nothing stopping that before.
   if(btn){ if(btn.disabled) return; btn.disabled = true; btn.textContent = 'Starting payment…'; }
@@ -10762,6 +10864,7 @@ async function startGcashPayment(id, btn){
   window.location.href = data.checkout_url; // real PayMongo (test mode) GCash checkout
 }
 async function startMayaPayment(id, btn){
+  if(!requirePermission('markInvoicePaid')) return; // see startGcashPayment for why
   if(btn){ if(btn.disabled) return; btn.disabled = true; btn.textContent = 'Starting payment…'; }
   const errEl = document.getElementById('mayaPayError_'+id);
   if(errEl) errEl.textContent = '';
@@ -11466,11 +11569,11 @@ function submitPartialConfirm(id){
   po.lineItems = confirmedQtys.map(c=>({product:c.product, qty:c.confirmed, unitPrice:c.unitPrice}));
   po.status = 'confirmed';
   po.partialConfirmation = {originalLineItems: confirmedQtys.map(c=>({product:c.product, qty:c.ordered, unitPrice:c.unitPrice}))};
-  poLogHistory(po, 'supplier', 'Confirmed partial quantities — ' + shortfall.map(s=>s.product+' short by '+s.qty).join(', '));
-  applyOrderToSupplierCommitted(po);
 
   // The shortfall becomes its own real order — same buyer, same supplier, same agreed prices —
-  // sitting as a backorder until the supplier is ready to actually confirm and ship it.
+  // sitting as a backorder until the supplier is ready to actually confirm and ship it. Computed
+  // (and po.backorderPoId set) BEFORE poLogHistory syncs `po` below, so that sync's upload of `po`
+  // already carries the link to the new backorder instead of writing it one sync behind.
   const backorderId = newPoId();
   poIdCounter++;
   const backorderNumber = issuePoNumber();
@@ -11484,8 +11587,11 @@ function submitPartialConfirm(id){
     invoice:null, counter:null, deliveryConfirmation:null, atRisk:false, riskNote:'', backorderFromPoId: po.id,
     history:[{date:APP_TODAY, time:'Just now', actor:'supplier', action:'Created as a backorder from '+po.poNumber}],
   };
-  purchaseOrders.push(backorderPO);
   po.backorderPoId = backorderId;
+  poLogHistory(po, 'supplier', 'Confirmed partial quantities — ' + shortfall.map(s=>s.product+' short by '+s.qty).join(', '));
+  applyOrderToSupplierCommitted(po);
+  purchaseOrders.push(backorderPO);
+  syncPoToSupabase(backorderPO); // brand-new order — poLogHistory above only synced `po` itself
 
   pushBuyerInboxItem({title:'Partially confirmed — '+po.poNumber, meta:shortfall.map(s=>s.product+': '+s.qty+' short, backordered as '+backorderNumber).join(' · '), pillLabel:'Partial', pillClass:'pill-lowstock', poId:po.id});
   const formEl2 = document.getElementById('partialConfirmForm_'+id);
@@ -12671,6 +12777,22 @@ async function loadMyRfqs(){
   rfqs.length = 0; rfqs.push(...mapped);
 }
 let rfqRealtimeChannels = [];
+// Same reasoning as notifyPoRealtimeChange (see there) — every existing RFQ inbox push is scoped
+// to the account that just acted, so this is what actually tells the real counterparty an RFQ they
+// weren't the one to change just did.
+function notifyRfqRealtimeChange(rfq, isNewToMe){
+  const myRole = myBusiness.type;
+  const last = (rfq.history||[])[rfq.history.length-1];
+  if(!last || last.actor === myRole) return;
+  // No `type` set — see the comment in notifyPoRealtimeChange on why 'purchase' etc. would render
+  // a cosmetic-only Accept/Decline button here too. poId is null (this isn't a PO), so this falls
+  // through to a plain Acknowledge button rather than a misleading action.
+  if(rfq.supplierId === myBusiness.id){
+    pushSupplierInboxItem({title: (isNewToMe ? 'New RFQ — ' : rfq.rfqNumber+' — ')+(isNewToMe ? rfq.rfqNumber : last.action), meta: last.action, poId: null});
+  } else if(rfq.buyerId === myBusiness.id){
+    pushBuyerInboxItem({title: rfq.rfqNumber+' — '+last.action, meta: last.action, pillLabel:'RFQ', pillClass:'pill-info', poId: null});
+  }
+}
 function subscribeToRfqs(){
   if(!myBusiness) return;
   rfqRealtimeChannels.forEach(ch => sb.removeChannel(ch));
@@ -12680,6 +12802,7 @@ function subscribeToRfqs(){
     const mapped = await mapRfqRowToJs(payload.new);
     const idx = rfqs.findIndex(r=>r.id===mapped.id);
     if(idx>-1) rfqs[idx] = mapped; else rfqs.push(mapped);
+    notifyRfqRealtimeChange(mapped, idx===-1);
     if(document.getElementById('rfqListBox')) renderRfqSection();
   }
   ['buyer_business_id','supplier_business_id'].forEach(col=>{
@@ -12859,6 +12982,7 @@ async function acceptRfqQuote(id){
     history:[{date: today, actor:'buyer', action:'Draft created from accepted RFQ '+rfq.rfqNumber}],
   };
   purchaseOrders.push(newPO);
+  syncPoToSupabase(newPO); // the RFQ update above only synced the RFQ row itself — this is a brand-new PO
   renderRfqSection();
   if(document.getElementById('orderRows')) renderOrdersTable();
   showToast('Quote accepted — a draft Purchase Order has been created from it. You can review and send it from Orders & Freight.', 'success');
@@ -12971,19 +13095,32 @@ async function commitSendInvite(name){
   row.className = 'invite-row';
   row.innerHTML = `<div><div class="invite-name">${name}</div><div class="invite-meta">Sent just now via ${selectedChannels.join(' + ')}</div></div><div style="display:flex;align-items:center;gap:14px;"><span class="status-pill pill-sent">Pending</span><span class="row-action" onclick="editInvite(${jsStringLiteral(name)})">Edit</span><span class="row-action" style="color:var(--danger);" onclick="deleteInvite(this)">Delete</span></div>`;
   document.querySelector('#page-invite .status-list').appendChild(row);
-  document.getElementById('channelConfirm').innerHTML = `✓ Sent via ${selectedChannels.join(' + ')}.`;
   trackEvent('supplier_invite_sent', {count:1, channels:selectedChannels});
+  const confirmEl = document.getElementById('channelConfirm');
   // Real accounts also create a real, matchable invite — this is what actually connects two
   // businesses (see handle_new_user()'s business_invites check): when that supplier signs up
   // with this email, business_relationships + a real conversation get created automatically.
   // Demo mode has no email captured here to invite against, so this only ever fires signed in.
+  // The "✓ Sent" confirmation used to render synchronously, before this async insert even started
+  // — a real failure (or a blank email, which meant nothing matchable was ever created) still
+  // showed a permanent-looking success message and left a "Pending" row that would never resolve,
+  // with no indication anything had gone wrong.
   if(myBusiness){
     const email = (document.getElementById('supEmail')?.value || '').trim();
-    if(email){
-      const { error } = await sb.from('business_invites').insert({ inviting_business_id: myBusiness.id, invited_email: email });
-      if(error && error.code !== '23505'){ console.warn('Real supplier invite not sent:', error.message); } // 23505 = already invited, not a real failure
+    if(!email){
+      row.remove();
+      if(confirmEl){ confirmEl.style.color = 'var(--danger)'; confirmEl.textContent = 'Enter an email to invite this supplier.'; }
+      return;
+    }
+    const { error } = await sb.from('business_invites').insert({ inviting_business_id: myBusiness.id, invited_email: email });
+    if(error && error.code !== '23505'){ // 23505 = already invited, not a real failure
+      console.warn('Real supplier invite not sent:', error.message);
+      row.remove();
+      if(confirmEl){ confirmEl.style.color = 'var(--danger)'; confirmEl.textContent = "Couldn't send the invite — try again."; }
+      return;
     }
   }
+  if(confirmEl){ confirmEl.style.color = ''; confirmEl.innerHTML = `✓ Sent via ${selectedChannels.join(' + ')}.`; }
 }
 // Section 6 #15 — bulk invite from contacts
 const MOCK_CONTACTS = [
@@ -19516,7 +19653,7 @@ function collectNiftiPersistableState(){
     savedAt: new Date().toISOString(),
     inventoryData, supplyData, suppliersData, buyersData,
     buyerConversations, supplierConversations, purchaseOrders,
-    standingPriceAgreements, deletedPriceAgreements, supplierInbox,
+    standingPriceAgreements, deletedPriceAgreements, supplierInbox, buyerInbox,
     customRoles, notificationsData, notificationSettings,
     supplierProductCatalogs, myCatalog, myCatalogPublic, rfqs,
     dismissedIssueIds: NIFTI_DISMISSED_ISSUE_IDS,
@@ -19533,7 +19670,7 @@ function collectNiftiPersistableState(){
     myBuyerProfilePublic,
     reminderLog: NiftiDB.reminderLog,
     dismissedInsightKeys: NiftiDB.dismissedInsightKeys,
-    poIdCounter, whIdCounter, supplierInboxCounter,
+    poIdCounter, whIdCounter, supplierInboxCounter, buyerInboxCounter,
     currentAppRole, currentUserId, currentLanguage,
     whLabel, supplyLocationLabel,
     taxProfiles,
@@ -19555,6 +19692,7 @@ function applyNiftiPersistedState(s){
   standingPriceAgreements = s.standingPriceAgreements || standingPriceAgreements;
   deletedPriceAgreements = s.deletedPriceAgreements || deletedPriceAgreements;
   supplierInbox = s.supplierInbox || supplierInbox;
+  buyerInbox = s.buyerInbox || buyerInbox;
   customRoles = s.customRoles || customRoles;
   notificationsData = s.notificationsData || notificationsData;
   notificationSettings = s.notificationSettings || notificationSettings;
@@ -19588,6 +19726,7 @@ function applyNiftiPersistedState(s){
   poIdCounter = s.poIdCounter || poIdCounter;
   whIdCounter = s.whIdCounter || whIdCounter;
   supplierInboxCounter = s.supplierInboxCounter || supplierInboxCounter;
+  buyerInboxCounter = s.buyerInboxCounter || buyerInboxCounter;
   currentAppRole = s.currentAppRole || currentAppRole;
   currentUserId = s.currentUserId || currentUserId;
   currentLanguage = s.currentLanguage || currentLanguage;
