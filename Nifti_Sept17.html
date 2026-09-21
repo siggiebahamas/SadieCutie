@@ -4409,7 +4409,7 @@ function applyRoleAwareText(role){
 
 function renderSupplierDashboard(){
   document.getElementById('supplierDashboardView').innerHTML = `
-    <div class="page-head"><h1 data-i18n="dash_greeting_sup">Good morning, Metro Steel Co.</h1><p data-i18n="dash_sub">Here's what needs your attention today.</p></div>
+    <div class="page-head"><h1 data-i18n="dash_greeting_sup">Good morning, ${myBusiness ? myBusiness.name : 'Metro Steel Co.'}</h1><p data-i18n="dash_sub">Here's what needs your attention today.</p></div>
     <!-- Section 7 #8 — referral/growth loop, treated as a headline feature: a supplier who
          joined via a buyer's invite gets the exact same free, no-friction invite flow to bring
          in their own customers. -->
@@ -4497,6 +4497,11 @@ function renderSupplierInbox(){
       actionsHtml = `<button class="btn btn-primary" style="padding:6px 12px;font-size:15px;" onclick="resolveSupplierInboxItem('${item.id}', '✓ Confirmation sent to buyer')">Confirm</button>`;
     } else if(item.poId){
       actionsHtml = `<span class="row-action" style="font-size:15px;font-weight:700;" onclick="resolveSupplierInboxItem('${item.id}', '✓ Acknowledged'); navigate('orders'); setTimeout(()=>toggleOrderRow('${item.poId}'),60);">View PO →</span>`;
+    } else if(item.isRfq){
+      // Matches renderBuyerInbox's own isRfq routing — a live "New RFQ"/RFQ-update push has no
+      // poId (it isn't a PO yet), and previously fell through to a bare Acknowledge button with no
+      // way back to the RFQ itself.
+      actionsHtml = `<span class="row-action" style="font-size:15px;font-weight:700;" onclick="resolveSupplierInboxItem('${item.id}', '✓ Acknowledged'); navigate('invite'); setInviteTab('rfq');">View RFQ →</span>`;
     } else {
       actionsHtml = `<button class="btn btn-outline" style="padding:6px 12px;font-size:15px;" onclick="resolveSupplierInboxItem('${item.id}', '✓ Acknowledged')">Acknowledge</button>`;
     }
@@ -7374,6 +7379,7 @@ function sendTermsProposal(partyId){
   }
 }
 function agreeToTerms(partyId){
+  if(!requirePermission('proposeTerms')) return; // matches sendTermsProposal — this equally commits the business to real trade terms, just via the "accept" side instead of the "propose" side
   const isSupplierRole = currentAppRole === 'supplier';
   const key = relationshipKey(partyId, isSupplierRole);
   const t = termsOfTrade[key];
@@ -11731,6 +11737,7 @@ function renderDepositSection(po, side){
   </div>`;
 }
 function submitDepositPayment(id){
+  if(!requirePermission('markInvoicePaid')) return; // same financial-action gate as submitRecordPayment/bulkMarkPaidReconcile/submitRmaCreditNote — was missing here
   const po = getPO(id);
   const method = document.getElementById('depositMethod_'+id).value;
   const reference = document.getElementById('depositRef_'+id).value.trim();
@@ -12092,6 +12099,7 @@ function computeInvoiceDueDate(po){
   return base.getFullYear()+'-'+String(base.getMonth()+1).padStart(2,'0')+'-'+String(base.getDate()).padStart(2,'0');
 }
 function issueInvoice(id){
+  if(!requirePermission('markInvoicePaid')) return; // same gate as its close siblings generateSalesInvoice/bulkMarkPaidReconcile — this assigns the real sequential invoice number and can immediately flip the order to paid via a deposit/COD carry-over
   const po = getPO(id);
   snapshotPO(po);
   po._undoLabel = 'Invoice issued.';
@@ -12454,11 +12462,50 @@ function setOtifRange(range, el){
   el.classList.add('active');
   renderOtifChart();
 }
+// Real-account version — mirrors renderRealPointInTimeChart's on-time-rate chart on the main
+// Analytics page (buckets real delivered orders by date, no zero-padding for empty periods), also
+// respecting this chart's own 7d/30d/90d/6m/12m/all range tabs. Without this, the KPI text right
+// above this chart (computeFulfillmentMetrics's real otif%) was correct while the trend line under
+// it was entirely fabricated (genOtifDailyHistory, seeded random against a fixed OTIF_TODAY) for
+// every real supplier account, on every range.
+function getRealOtifDataForRange(range){
+  const delivered = getSupplierPOs().filter(o=>poIsDelivered(o) && (o.deliveryConfirmation || o.freightMilestones));
+  const dailyRangeDays = {'7d':7,'30d':30,'90d':90};
+  const isDaily = !!dailyRangeDays[range];
+  const byBucket = {};
+  delivered.forEach(o=>{
+    const confirmedDate = o.deliveryConfirmation ? o.deliveryConfirmation.confirmedDate
+      : (o.freightMilestones ? (o.freightMilestones.find(m=>m.key==='delivered')||{}).date : null);
+    if(!confirmedDate) return;
+    const key = isDaily ? confirmedDate : confirmedDate.slice(0,7); // YYYY-MM for month-bucketed ranges
+    if(!byBucket[key]) byBucket[key] = {num:0, den:0};
+    byBucket[key].den++;
+    if(poDeliveredOnTime(o)) byBucket[key].num++;
+  });
+  let keys = Object.keys(byBucket).sort();
+  if(isDaily){
+    const cutoff = new Date(APP_TODAY+'T00:00:00'); cutoff.setDate(cutoff.getDate() - dailyRangeDays[range]);
+    keys = keys.filter(k => new Date(k+'T00:00:00') >= cutoff);
+  } else if(range==='6m' || range==='12m'){
+    keys = keys.slice(-(range==='6m'?6:12));
+  }
+  const labels = keys.map(k=>{
+    if(isDaily){ const d = new Date(k+'T00:00:00'); return dailyRangeDays[range]<=7 ? otifDayLabel(d) : otifShortDateLabel(d); }
+    const [y,m] = k.split('-').map(Number); return MONTH_NAMES[m-1]+" '"+String(y).slice(2);
+  });
+  const data = keys.map(k=>Math.round((byBucket[k].num/byBucket[k].den)*100));
+  return { labels, data };
+}
 function renderOtifChart(){
-  const {labels, data} = getOtifDataForRange(otifChartRange);
+  const {labels, data} = myBusiness ? getRealOtifDataForRange(otifChartRange) : getOtifDataForRange(otifChartRange);
   const titleEl = document.getElementById('otifTrendTitle');
   if(titleEl) titleEl.textContent = OTIF_RANGE_TITLES[otifChartRange];
-  document.getElementById('supplyOtifChart').innerHTML = buildLineChartSVG(labels, [{label:'On time %', color:'#1B6B40', data}], 'Date', 'On time %');
+  const chartEl = document.getElementById('supplyOtifChart');
+  if(myBusiness && labels.length < 2){
+    chartEl.innerHTML = `<div style="text-align:center;color:var(--ink);padding:30px;font-size:15px;">Not enough delivered orders yet to show a trend here.</div>`;
+    return;
+  }
+  chartEl.innerHTML = buildLineChartSVG(labels, [{label:'On time %', color:'#1B6B40', data}], 'Date', 'On time %');
 }
 function renderFulfillmentFunnel(){
   const active = getSupplierPOs().filter(o=>o.status!=='draft' && o.status!=='cancelled');
@@ -12859,7 +12906,7 @@ function notifyRfqRealtimeChange(rfq, isNewToMe){
   // a cosmetic-only Accept/Decline button here too. poId is null (this isn't a PO), so this falls
   // through to a plain Acknowledge button rather than a misleading action.
   if(rfq.supplierId === myBusiness.id){
-    pushSupplierInboxItem({title: (isNewToMe ? 'New RFQ — ' : rfq.rfqNumber+' — ')+(isNewToMe ? rfq.rfqNumber : last.action), meta: last.action, poId: null});
+    pushSupplierInboxItem({title: (isNewToMe ? 'New RFQ — ' : rfq.rfqNumber+' — ')+(isNewToMe ? rfq.rfqNumber : last.action), meta: last.action, poId: null, isRfq:true}); // isRfq routes the click to the RFQ tab — see renderSupplierInbox
   } else if(rfq.buyerId === myBusiness.id){
     pushBuyerInboxItem({title: rfq.rfqNumber+' — '+last.action, meta: last.action, pillLabel:'RFQ', pillClass:'pill-info', poId: null, isRfq:true}); // isRfq routes the click to the RFQ tab, not Team & Roles — see renderBuyerInbox
   }
@@ -13009,6 +13056,7 @@ function openQuoteForm(id){
   </div>`;
 }
 async function submitQuote(id){
+  if(!requirePermission('respondToPriceAgreement')) return; // this is a binding real price/lead-time commitment shown to the buyer — same category of action as responding to a standing price agreement
   const rfq = rfqs.find(r=>r.id===id);
   const price = Number(document.getElementById('quotePrice_'+id).value);
   const lead = Number(document.getElementById('quoteLead_'+id).value);
@@ -13239,11 +13287,17 @@ function submitBulkInvite(){
 function openSupplierPreview(){
   const supplierName = document.getElementById('supName').value || 'your supplier';
   const note = document.getElementById('supNote').value || '';
+  // Every other spot in this file needing "this business's real name/address instead of the demo
+  // one" branches on myBusiness (see saveCreatePO, autoDraftReorderIfNeeded, acceptRfqQuote) —
+  // this preview modal never did, so a real buyer clicking "See what your supplier will
+  // experience" saw someone else's fake business name and address shown as if it were their own.
+  const myName = myBusiness ? myBusiness.name : 'Dela Cruz Hardware';
+  const myAddress = myBusiness ? (savedBuyerAddresses[0] || 'No delivery address on file yet') : 'Dela Cruz Hardware, Marikina City';
   document.getElementById('supplierPreviewBody').innerHTML = `
     <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:12px;">
-      <div style="font-size:15px;font-weight:700;color:var(--green);margin-bottom:4px;">Provided by Dela Cruz Hardware</div>
-      <div><strong>Buyer:</strong> Dela Cruz Hardware</div>
-      <div><strong>Delivery address:</strong> Dela Cruz Hardware, Marikina City</div>
+      <div style="font-size:15px;font-weight:700;color:var(--green);margin-bottom:4px;">Provided by ${myName}</div>
+      <div><strong>Buyer:</strong> ${myName}</div>
+      <div><strong>Delivery address:</strong> ${myAddress}</div>
     </div>
     <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;">
       <div style="font-size:15px;font-weight:700;color:var(--lowstock);margin-bottom:4px;">Draft first order — built from your invite note</div>
@@ -14591,7 +14645,12 @@ function sliceRealForRange(range, seriesArr){
     const newLabels = []; const newSeries = seriesArr.map(s=>({...s, data:[]}));
     for(let i=0;i<labels24.length;i+=3){
       newLabels.push('Q'+(Math.floor(i/3)+1));
-      dataSlices.forEach((arr,si)=>{ const chunk = arr.slice(i,i+3); newSeries[si].data.push(Math.round((chunk.reduce((a,b)=>a+b,0)/chunk.length)*100)/100); });
+      // This function's only caller (renderRealAdditiveChart, via getRealAdditiveChartConfig) is
+      // exclusively additive metrics — spend, revenue, order volume/count. Dividing by chunk.length
+      // here averaged 3 real monthly totals into one, showing roughly a THIRD of a quarter's true
+      // spend/revenue as if it were the actual total. Summing (matching the 'monthly' branch, which
+      // never divided at all) is the correct aggregation for an additive metric.
+      dataSlices.forEach((arr,si)=>{ const chunk = arr.slice(i,i+3); newSeries[si].data.push(Math.round(chunk.reduce((a,b)=>a+b,0)*100)/100); });
     }
     return { labels:newLabels, series:newSeries };
   }
@@ -14599,7 +14658,9 @@ function sliceRealForRange(range, seriesArr){
     const newLabels = []; const newSeries = seriesArr.map(s=>({...s, data:[]}));
     for(let i=0;i<60;i+=12){
       newLabels.push("'"+String(meta[i+11].y).slice(2));
-      seriesArr.forEach((s,si)=>{ const chunk = s.data.slice(i,i+12); newSeries[si].data.push(Math.round((chunk.reduce((a,b)=>a+b,0)/chunk.length)*100)/100); });
+      // Same fix as 'quarterly' above — was averaging 12 real monthly totals into one, showing
+      // roughly a TWELFTH of a year's true spend/revenue.
+      seriesArr.forEach((s,si)=>{ const chunk = s.data.slice(i,i+12); newSeries[si].data.push(Math.round(chunk.reduce((a,b)=>a+b,0)*100)/100); });
     }
     return { labels:newLabels, series:newSeries };
   }
@@ -18170,6 +18231,11 @@ function copyReferralLink(){
 // Same pattern as the existing SMS-confirm simulation elsewhere in this build — a labeled
 // simulate action standing in for a real signup event this artifact has no server to receive.
 function simulateReferralSignup(){
+  // Same class of issue Discover/bulk-invite were fixed for: this is a demo-only simulation
+  // button, rendered unconditionally for every account, that writes a fabricated "1 month free"
+  // credit line straight into this account's own billing history via addBillingHistoryEntry below
+  // — for a real account that reads as a genuine referral reward with no real referral behind it.
+  if(myBusiness){ showToast("Referral simulation isn't available for live accounts — real referral rewards post automatically when someone actually joins through your link.", 'error'); return; }
   const name = REFERRAL_SIMULATED_NAMES[NiftiDB.referrals.invited.length % REFERRAL_SIMULATED_NAMES.length];
   NiftiDB.referrals.invited.push({name, joinedDate:APP_TODAY});
   addBillingHistoryEntry(`Referral reward — 1 month free (${name} joined via your link)`, 0, 'credit');
@@ -19492,8 +19558,21 @@ const TRANSLATIONS = {
   },
 };
 function t(key){ return (TRANSLATIONS[currentLanguage] && TRANSLATIONS[currentLanguage][key]) || TRANSLATIONS.EN[key] || key; }
+// dash_greeting_buyer/dash_greeting_sup ship as full sentences with the demo business name baked
+// in ('Good morning, Dela Cruz Hardware' / '...Metro Steel Co.') — applyRealAccountUI() scrubs
+// most demo names elsewhere, but this one lives inside a translated dictionary string, so it was
+// never touched: every real buyer/supplier saw the demo business's name in their own Dashboard
+// greeting, on every load, and it reverted right back even if patched once, since toggleLanguage()
+// re-runs applyTranslations() from the dictionary again. A targeted string-replace here (both EN
+// and FIL variants share the same literal demo name substring) survives a language toggle too.
+const DASH_GREETING_DEMO_NAME = {dash_greeting_buyer:'Dela Cruz Hardware', dash_greeting_sup:'Metro Steel Co.'};
 function applyTranslations(){
-  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    let text = t(key);
+    if(myBusiness && DASH_GREETING_DEMO_NAME[key]) text = text.replace(DASH_GREETING_DEMO_NAME[key], myBusiness.name);
+    el.textContent = text;
+  });
   applyRoleAwareText(currentAppRole); // the two role-dependent nav labels use t() internally now too
   const btn = document.getElementById('langToggle');
   if(btn){
@@ -19777,7 +19856,13 @@ function applyNiftiPersistedState(s){
   deletedPriceAgreements = s.deletedPriceAgreements || deletedPriceAgreements;
   supplierInbox = s.supplierInbox || supplierInbox;
   buyerInbox = s.buyerInbox || buyerInbox;
-  customRoles = s.customRoles || customRoles;
+  // Guarded for a real account — loadMyBusinessContext() (which runs BEFORE this, in bootNifti())
+  // already fetched this business's real, live custom_roles rows via loadMyCustomRoles(). Restoring
+  // unconditionally from this device's last-saved local snapshot here would clobber that fresh
+  // fetch with stale data — e.g. a role's page access changed on another device, or by another
+  // teammate, reverts back to what THIS device last saw until some unrelated realtime event
+  // happens to refresh it again.
+  if(!myBusiness) customRoles = s.customRoles || customRoles;
   notificationsData = s.notificationsData || notificationsData;
   notificationSettings = s.notificationSettings || notificationSettings;
   // Migrate old single-channel saves (channel:'viber') to the new multi-channel shape, so an
@@ -19793,6 +19878,13 @@ function applyNiftiPersistedState(s){
   myCatalog = s.myCatalog || myCatalog;
   myCatalogPublic = (typeof s.myCatalogPublic === 'boolean') ? s.myCatalogPublic : myCatalogPublic;
   taxProfiles = s.taxProfiles || taxProfiles;
+  // taxProfiles.businessName was already freshly set from the real business's own row in
+  // loadMyBusinessContext() (which runs before this) — most of taxProfiles (TIN, RDO code,
+  // registeredAddress, VAT status) has no Supabase backing at all and genuinely needs the local
+  // restore above, but businessName does, so re-assert it here rather than let the restore above
+  // silently revert it to whatever name this device last had saved (e.g. before a rename made on
+  // another device) — that field prints on real, generated Sales Invoices.
+  if(myBusiness) taxProfiles[myBusiness.type].businessName = myBusiness.name;
   sharedContact = s.sharedContact || sharedContact;
   priceProtectionTally = s.priceProtectionTally || priceProtectionTally;
   currencyDisplayPref = s.currencyDisplayPref || currencyDisplayPref;
@@ -19801,7 +19893,9 @@ function applyNiftiPersistedState(s){
   teamActivityLog = s.teamActivityLog || teamActivityLog;
   teamChatMessages = s.teamChatMessages || teamChatMessages;
   teamTaskIdCounter = s.teamTaskIdCounter || teamTaskIdCounter;
-  supplierTeamMembers = s.supplierTeamMembers || supplierTeamMembers;
+  // Same reasoning as customRoles above — loadMyTeamRoster() already fetched this business's real,
+  // live team_members roster (into supplierTeamMembers for a supplier account) before this runs.
+  if(!myBusiness) supplierTeamMembers = s.supplierTeamMembers || supplierTeamMembers;
   downstreamSalesEnabled = (s.downstreamSalesEnabled !== undefined) ? s.downstreamSalesEnabled : downstreamSalesEnabled;
   downstreamCustomers = s.downstreamCustomers || downstreamCustomers;
   downstreamSales = s.downstreamSales || downstreamSales;
