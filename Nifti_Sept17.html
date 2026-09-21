@@ -3125,6 +3125,23 @@ async function loadMyBusinessContext(){
   // replaced below by this business's own saved copy, if it has one.
   NIFTI_STORAGE_KEY = 'nifti-app-state-v1:biz-' + myBusiness.id;
   APP_TODAY = realTodayDateStr();
+  // buyerInbox/supplierInbox ship with fabricated demo notifications ("Cebu Aggregates proposed
+  // ₱205", poId references to demo POs that don't exist once real orders load) — nothing ever
+  // cleared them for a real account, so every real user's very first Dashboard visit showed these
+  // as if they were real, actionable notifications about counterparties that don't exist for them.
+  buyerInbox = []; supplierInbox = [];
+  // taxProfiles ships with the demo business name/address baked in — left alone, a real
+  // account's BIR-relevant Tax & Registration settings would show "Dela Cruz Hardware"/"Metro
+  // Steel Co." until manually edited, and generateSalesInvoice freezes that as the seller of
+  // record onto the FIRST real Sales Invoice ever issued. registeredAddress has no real backing
+  // column (businesses only has name/type), so it's cleared rather than left at a fake default.
+  taxProfiles[myBusiness.type].businessName = myBusiness.name;
+  taxProfiles[myBusiness.type].registeredAddress = '';
+  // Same problem for a real supplier's own product catalog — without this, a brand-new real
+  // supplier's My Catalog panel shows 4 fake demo products/prices as if they were their own
+  // listings, which then also leaks into the price-agreement product picker (see
+  // syncMyCatalogToBuyerReference, called unconditionally later in boot).
+  myCatalog = [];
   await loadMyTeamRoster();
   await loadMyCustomRoles();
   return true;
@@ -3639,7 +3656,12 @@ function saveSharedContact(){
   const name = document.getElementById('settingsSharedContactName').value.trim();
   const phone = document.getElementById('settingsSharedContactPhone').value.trim();
   if(!name || !phone){ document.getElementById('sharedContactConfirm').textContent = 'Please fill in both fields.'; return; }
-  document.getElementById('sharedContactConfirm').textContent = 'Saved — staff can now look up this account by "'+name+'" or '+phone+'.';
+  // Previously never wrote to any variable — "Saved" was false, and the fields went blank again
+  // on reload. No actual lookup-by-name/phone feature exists anywhere in the app, so the message
+  // below only claims what this genuinely does now: remembers the contact for this business.
+  sharedContact = {name, phone};
+  scheduleNiftiSave();
+  document.getElementById('sharedContactConfirm').textContent = 'Saved — "'+name+'" ('+phone+') is on file as this business\'s shared contact.';
 }
 // Section 5 #33 — Guest Access Link
 function generateGuestAccessLink(){
@@ -3667,6 +3689,7 @@ async function saveBusinessProfile(){
     const { error } = await sb.from('businesses').update({ name }).eq('id', myBusiness.id);
     if(error){ showToast("Couldn't save that name — try again.", 'error'); return; }
     myBusiness.name = name;
+    if(taxProfiles[myBusiness.type]) taxProfiles[myBusiness.type].businessName = name;
   }
   // Update the visible name in the topbar user chip (text node that follows the avatar div)
   document.querySelectorAll('.user-chip').forEach(chip=>{
@@ -4496,6 +4519,12 @@ const ACTION_PERMISSIONS = {
   // Account/admin
   manageAccount:        ['Owner'],
 };
+// The three actions above are deliberately Owner-only, excluding General Manager even though GM
+// is in PRIVILEGED_ROLES for everything else — requirePermission's blanket "Owner/GM always
+// pass" short-circuit used to override that restriction, letting a General Manager reassign
+// anyone's roles (including promoting themselves to Owner or removing the real Owner), manage
+// custom roles, and change account settings, contradicting this file's own stated design.
+const OWNER_ONLY_ACTIONS = new Set(['manageRoles','manageTeam','manageAccount']);
 // Messaging stays open to every role, including a custom Owner-defined role scoped to just
 // the Messages page — gating it the same as data mutations would defeat the point of that
 // kind of role existing at all.
@@ -4504,7 +4533,7 @@ const ACTIONS_OPEN_TO_ALL_ROLES = new Set(['sendMessage']);
 function requirePermission(actionKey, opts){
   if(ACTIONS_OPEN_TO_ALL_ROLES.has(actionKey)) return true;
   const roles = getEffectiveRoles();
-  if(roles.some(r => PRIVILEGED_ROLES.includes(r))) return true; // Owner/General Manager always pass
+  if(!OWNER_ONLY_ACTIONS.has(actionKey) && roles.some(r => PRIVILEGED_ROLES.includes(r))) return true; // Owner/General Manager always pass, except the Owner-only actions above
   const allowed = ACTION_PERMISSIONS[actionKey];
   const ok = Array.isArray(allowed) && roles.some(r => allowed.includes(r));
   if(!ok){
@@ -5232,11 +5261,12 @@ function autoDraftReorderIfNeeded(item){
     buyerId:ME_BUYER, buyerName: myBusiness ? myBusiness.name : 'Dela Cruz Hardware', supplierId:supplierEntry.id, supplierName:supplierEntry.name,
     type:'local', status:'draft', taxRate:0.12,
     lineItems:[{product:item.name, qty:suggestedQty, unitPrice}],
-    createdDate:APP_TODAY, requestedDeliveryDate:'', deliveryAddress:'Dela Cruz Hardware, Marikina City', notes:'Auto-drafted — '+item.name+' hit its restock level.',
+    createdDate:APP_TODAY, requestedDeliveryDate:'', deliveryAddress: myBusiness ? (savedBuyerAddresses[0]||'') : 'Dela Cruz Hardware, Marikina City', notes:'Auto-drafted — '+item.name+' hit its restock level.',
     shipping:null, customs:null, invoice:null, counter:null, deliveryConfirmation:null, atRisk:false, riskNote:'',
     history:[{date:APP_TODAY, time:'Just now', actor:'buyer', action:'Draft auto-created — '+item.name+' hit its restock level'}],
   };
   purchaseOrders.push(newPO);
+  syncPoToSupabase(newPO); // without this, a real account's auto-drafted reorder never reached Supabase and vanished on reload
   item.autoReorderDraftId = newPO.id;
   pushBuyerInboxItem({title:'Draft ready for review — '+item.name, meta:poNumber+' · Hit its restock level, suggested qty '+suggestedQty, pillLabel:'Auto-draft', pillClass:'pill-lowstock', poId:newPO.id});
 }
@@ -6001,24 +6031,43 @@ function sendInlineMessage(partyId, poId){
   const po = getPO(poId);
   const conv = getConversations().find(c=>c.id===partyId);
   if(conv){
-    conv.messages.push({from:'me', text, time:'Just now', date:'2026-08-26', poRef: po ? po.poNumber : undefined});
+    // Matches sendMessage()'s real-account handling (real id/date, and an actual sync call) —
+    // without this, a message composed here from inside Orders & Freight never reached Supabase
+    // and vanished on the next reload, unlike the same message sent from the Messages page.
+    const newMsg = {id: newMessageId(), from:'me', text, time:'Just now', date: APP_TODAY, poRef: po ? po.poNumber : undefined};
+    conv.messages.push(newMsg);
     capConversationMessages(conv);
+    if(myBusiness) sendRealMessage(conv, newMsg);
   }
   const el = document.getElementById('inlineMsg_'+poId);
   el.innerHTML = `<div style="margin-top:8px;font-size:15.5px;font-weight:700;color:var(--green);">Message sent to ${conv ? conv.name : 'them'}. <span class="row-action" onclick="event.stopPropagation(); navigate('messages'); selectConversation('${partyId}');">Open full thread →</span></div>`;
 }
 function renderSupplierChips(){
   const isSupplierRole = currentAppRole === 'supplier';
-  document.getElementById('supplierChips').innerHTML = isSupplierRole
-    ? `<div class="chip active" onclick="setSupplierFilter('all',this)">All (6)</div>
-       <div class="chip" onclick="setSupplierFilter('attention',this)">Needs attention (2)</div>
-       <div class="chip" onclick="setSupplierFilter('Construction',this)">Construction (2)</div>
-       <div class="chip" onclick="setSupplierFilter('Fabrication',this)">Fabrication (2)</div>`
-    : `<div class="chip active" onclick="setSupplierFilter('all',this)">All (8)</div>
-       <div class="chip" onclick="setSupplierFilter('attention',this)">Needs attention (2)</div>
-       <div class="chip" onclick="setSupplierFilter('Steel',this)">Steel &amp; Metal (2)</div>
-       <div class="chip" onclick="setSupplierFilter('Cement',this)">Cement &amp; Aggregates (1)</div>
-       <div class="chip" onclick="setSupplierFilter('Produce',this)">Produce (2)</div>`;
+  if(myBusiness){
+    // The demo's chips (fixed labels/counts, a fixed category taxonomy) only ever matched the
+    // demo's own seed data — a real account's actual connection count and category names are
+    // whatever its real business_relationships rows say, so the chips are built from that live.
+    const dataset = isSupplierRole ? buyersData : suppliersData;
+    const attentionCount = dataset.filter(s=>{ const r = computeCounterpartReliability(s.id, isSupplierRole); return r.status==='ok' && r.score < 75; }).length;
+    const categories = {};
+    dataset.forEach(s=>{ const cat = (s.category||'').trim(); if(cat) categories[cat] = (categories[cat]||0)+1; });
+    const catChips = Object.keys(categories).sort().map(cat=>`<div class="chip" onclick="setSupplierFilter(${jsStringLiteral(cat)},this)">${cat} (${categories[cat]})</div>`).join('');
+    document.getElementById('supplierChips').innerHTML = `<div class="chip active" onclick="setSupplierFilter('all',this)">All (${dataset.length})</div>
+       <div class="chip" onclick="setSupplierFilter('attention',this)">Needs attention (${attentionCount})</div>
+       ${catChips}`;
+  } else {
+    document.getElementById('supplierChips').innerHTML = isSupplierRole
+      ? `<div class="chip active" onclick="setSupplierFilter('all',this)">All (6)</div>
+         <div class="chip" onclick="setSupplierFilter('attention',this)">Needs attention (2)</div>
+         <div class="chip" onclick="setSupplierFilter('Construction',this)">Construction (2)</div>
+         <div class="chip" onclick="setSupplierFilter('Fabrication',this)">Fabrication (2)</div>`
+      : `<div class="chip active" onclick="setSupplierFilter('all',this)">All (8)</div>
+         <div class="chip" onclick="setSupplierFilter('attention',this)">Needs attention (2)</div>
+         <div class="chip" onclick="setSupplierFilter('Steel',this)">Steel &amp; Metal (2)</div>
+         <div class="chip" onclick="setSupplierFilter('Cement',this)">Cement &amp; Aggregates (1)</div>
+         <div class="chip" onclick="setSupplierFilter('Produce',this)">Produce (2)</div>`;
+  }
   supplierFilter = 'all';
   const inviteBtn = document.getElementById('suppliersInviteBtn');
   const headCol = document.getElementById('suppliersTableHeadCol');
@@ -6457,6 +6506,7 @@ let taxProfiles = {
     regType:'atp', regNumber:'', regValidUntil:'', nextSiNumber:1, nextDrNumber:1, nextCnNumber:1},
 };
 function getMyTaxProfile(){ return taxProfiles[currentAppRole] || taxProfiles.buyer; }
+let sharedContact = {name:'', phone:''};
 
 const PO_STATUS_LABELS = {
   draft:'Draft', sent:'Sent', confirmed:'Confirmed', countered:'Counter-Offer Sent',
@@ -6911,9 +6961,20 @@ function renderCreditLimitRow(s, isSupplierRole){
     const outstanding = getOutstandingBalanceWithParty(s.id, ME_SUPPLIER);
     return `<div class="expand-detail-item"><div class="k">Credit limit<span class="kpi-info" tabindex="0">ⓘ<span class="kpi-tooltip">If set, Nifti blocks this buyer from sending a new order that would push their outstanding balance with you past this amount.</span></span></div><div class="v">${limit ? fmtPHP(limit)+' (currently owes '+fmtPHP(outstanding)+')' : 'No limit set'} <span class="row-action" onclick="event.stopPropagation(); editCreditLimit('${s.id}')">Edit</span></div></div>`;
   }
-  // Buyer's view: only meaningful for the one supplier relationship this prototype actually
-  // simulates from both sides (Metro Steel Co.) — there's no reciprocal credit data to show for
-  // any other supplier, so the row is simply omitted rather than showing a fake/blank limit.
+  // Buyer's view of their own limit with this supplier. For a real account, `s` is that real
+  // connection (loadMyConnections already carries its real credit_limit) — the old version only
+  // ever checked buyersData for ME_BUYER/ME_SUPPLIER, which are demo-only constants a real buyer
+  // never matches (buyersData is never populated for a real buyer at all), so this row silently
+  // never showed and the limit was never enforceable for any real supplier relationship.
+  if(myBusiness){
+    if(!s.creditLimit) return '';
+    const outstanding = getOutstandingBalanceWithParty(myBusiness.id, s.id);
+    const pctUsed = Math.min(100, Math.round((outstanding/s.creditLimit)*100));
+    return `<div class="expand-detail-item"><div class="k">Your credit limit here<span class="kpi-info" tabindex="0">ⓘ<span class="kpi-tooltip">Set by ${s.name}. A new order that would push what you owe them past this gets blocked until you pay some down or they raise it.</span></span></div><div class="v">${fmtPHP(outstanding)} of ${fmtPHP(s.creditLimit)} used (${pctUsed}%)</div></div>`;
+  }
+  // Demo: only meaningful for the one supplier relationship this prototype actually simulates
+  // from both sides (Metro Steel Co.) — there's no reciprocal credit data to show for any other
+  // supplier, so the row is simply omitted rather than showing a fake/blank limit.
   if(s.id !== ME_SUPPLIER) return '';
   const myRecord = buyersData.find(b=>b.id===ME_BUYER);
   if(!myRecord || !myRecord.creditLimit) return '';
@@ -7170,7 +7231,7 @@ function renderPriceAgreements(partyId, isSupplierRole){
           ${marketCell}
           <td>${a.effectiveDate}</td>
           <td>${a.endDate || 'No end date'}</td>
-          <td>${stale && isSupplierRole ? `<span class="row-action" onclick="event.stopPropagation(); reconfirmAgreementPrice('${a.id}')">Reconfirm</span>` : ''}<span class="row-action" onclick="event.stopPropagation(); togglePriceHistoryChart('${partyId}','${a.product.replace(/'/g,"\\'")}')">History</span> <span class="row-action" style="color:var(--danger);" onclick="event.stopPropagation(); openDeleteAgreementForm('${a.id}','${partyId}')">Remove</span></td>
+          <td>${stale && isSupplierRole ? `<span class="row-action" onclick="event.stopPropagation(); reconfirmAgreementPrice('${a.id}')">Reconfirm</span>` : ''}<span class="row-action" onclick="event.stopPropagation(); togglePriceHistoryChart('${partyId}','${a.product.replace(/'/g,"\\'")}', ${isSupplierRole})">History</span> <span class="row-action" style="color:var(--danger);" onclick="event.stopPropagation(); openDeleteAgreementForm('${a.id}','${partyId}')">Remove</span></td>
         </tr>
         <tr id="priceHistoryRow_${partyId}_${a.product.replace(/[^a-zA-Z0-9]/g,'_')}" class="hidden"><td colspan="${!isSupplierRole?6:5}"><div id="priceHistoryChart_${partyId}_${a.product.replace(/[^a-zA-Z0-9]/g,'_')}"></div></td></tr>`;
       }).join('')}
@@ -7316,7 +7377,7 @@ function confirmDeleteAgreement(id, partyId){
   if(idx===-1) return;
   const [removed] = standingPriceAgreements.splice(idx,1);
   removed.deletedReason = reason || '(no reason given)';
-  removed.deletedDate = '2026-08-26';
+  removed.deletedDate = APP_TODAY;
   deletedPriceAgreements.push(removed);
   if(deletedPriceAgreements.length > LOG_CAPS.deletedPriceAgreements) deletedPriceAgreements.splice(0, deletedPriceAgreements.length - LOG_CAPS.deletedPriceAgreements);
   document.getElementById('deleteAgreementForm_'+partyId).innerHTML='';
@@ -8107,6 +8168,11 @@ async function saveEditedRoles(id){
   const m = getActiveTeamMembers().find(t=>t.id===id);
   const newRoles = Array.from(document.querySelectorAll(`.tmEditRoleCheck_${id}:checked`)).map(c=>c.value);
   if(!newRoles.length){ showToast('Please select at least one role.'); return; }
+  // Without this, an Owner could deselect "Owner" from themselves (or from the only other Owner)
+  // and leave the business with nobody able to grant roles, remove people, or manage account
+  // settings ever again — those three actions are permanently Owner-only.
+  const otherOwnerExists = getActiveTeamMembers().some(t=>t.id!==id && t.roles.includes('Owner'));
+  if(!otherOwnerExists && !newRoles.includes('Owner')){ showToast("This business needs at least one Owner — keep Owner on this person, or make someone else Owner first."); return; }
   const oldRoles = m.roles;
   if(myBusiness){
     const { error } = await sb.from('team_members').update({ roles: newRoles }).eq('id', id);
@@ -8247,6 +8313,11 @@ async function saveTeamMember(){
 async function removeTeamMember(id){
   if(!requirePermission('manageTeam')) return;
   if(id === currentUserId){ showToast("You can't remove yourself."); return; }
+  const target = getActiveTeamMembers().find(t=>t.id===id);
+  if(target && target.roles.includes('Owner') && !getActiveTeamMembers().some(t=>t.id!==id && t.roles.includes('Owner'))){
+    showToast("Can't remove the only Owner — make someone else Owner first.");
+    return;
+  }
   if(!myBusiness){
     if(currentAppRole==='supplier') supplierTeamMembers = supplierTeamMembers.filter(m=>m.id!==id);
     else teamMembers = teamMembers.filter(m=>m.id!==id);
@@ -8980,7 +9051,7 @@ function addOrderDocument(id, side, type, input){
   const file = input.files[0]; if(!file) return;
   readImageFileCompressed(file, (dataUrl) => {
     po.documents = po.documents.filter(d=>d.type!==type);
-    po.documents.push({type, name:file.name, date:'2026-08-26', addedBy: side==='buyer' ? 'You' : po.supplierName, dataUrl});
+    po.documents.push({type, name:file.name, date:APP_TODAY, addedBy: side==='buyer' ? 'You' : po.supplierName, dataUrl});
     poLogHistory(po, side, 'Added document: '+type+' ('+file.name+')');
     if(side==='buyer') renderOrdersTable(); else renderSupplierOrdersTable();
   });
@@ -9038,7 +9109,7 @@ function submitAmendment(id){
     status:'pending', lineIndex:idx, product:po.lineItems[idx].product,
     requestedQty:qty, originalQty:po.lineItems[idx].qty,
     requestedDeliveryDate: newDate || null, originalDeliveryDate: po.requestedDeliveryDate,
-    note, urgent, date:'2026-08-26'
+    note, urgent, date:APP_TODAY
   });
   poLogHistory(po, 'buyer', 'Requested amendment — '+po.lineItems[idx].product+' qty → '+qty+(newDate ? ', new delivery date '+newDate : '')+(urgent ? ' (time-sensitive)' : ''));
   if(po.supplierId === ME_SUPPLIER){
@@ -9234,6 +9305,7 @@ function openRmaOutcomeForm(id, outcome){
   }
 }
 function submitRmaCreditNote(id){
+  if(!requirePermission('markInvoicePaid')) return;
   const po = getPO(id);
   const amount = Number(document.getElementById('rmaCreditAmount_'+id).value);
   if(!amount || amount<=0){ markFieldInvalid('rmaCreditAmount_'+id, 'Please enter a valid credit amount.'); return; }
@@ -9628,6 +9700,7 @@ function generateNextRecurringDraft(id){
     history:[{date:APP_TODAY, time:'Just now', actor:'buyer', action:'Draft auto-created from recurring order '+po.poNumber}],
   };
   purchaseOrders.push(newPO);
+  syncPoToSupabase(newPO); // without this, a real account's auto-drafted next cycle never reached Supabase and vanished on reload
   renderOrdersTable();
   showToast(`Next cycle's draft (${newPO.poNumber}) is ready for one-tap approval in your Orders list.`, 'success');
 }
@@ -9847,31 +9920,31 @@ function openSendConfirmModal(id){
   if(!po) return;
   const supplier = suppliersData.find(s=>s.id===po.supplierId);
   const lastOrder = supplier ? supplier.lastOrder : 'no prior orders on file with this supplier';
-  // Credit limit check — only enforceable where a real limit is actually on file, which in this
-  // simulation is only ever the buyer→Metro Steel Co. relationship (the one supplier persona
-  // this app actually plays both sides of). Blocks the send entirely rather than just warning,
-  // since "enforcement" means the order genuinely doesn't go out until it's resolved.
-  if(po.supplierId === ME_SUPPLIER){
-    const myRecord = buyersData.find(b=>b.id===ME_BUYER);
-    if(myRecord && myRecord.creditLimit){
-      const outstanding = getOutstandingBalanceWithParty(ME_BUYER, ME_SUPPLIER);
-      const thisOrderTotal = poTotal(po);
-      const wouldBe = outstanding + thisOrderTotal;
-      if(wouldBe > myRecord.creditLimit){
-        const overBy = wouldBe - myRecord.creditLimit;
-        document.getElementById('sendConfirmHeading').textContent = 'Order blocked — over credit limit';
-        document.getElementById('sendConfirmYesBtn').classList.add('hidden');
-        document.getElementById('sendConfirmApprovalBtn').classList.add('hidden');
-        document.getElementById('sendConfirmCancelBtn').textContent = 'Close';
-        document.getElementById('sendConfirmText').innerHTML = `<div style="padding:12px 14px;background:var(--danger-soft);border:1.5px solid var(--danger);border-radius:10px;">
-          <div style="font-weight:800;color:var(--danger);margin-bottom:8px;">This order can't be sent — it would go over your credit limit with ${po.supplierName}.</div>
-          <div style="font-size:15px;line-height:1.6;">You currently owe ${fmtPHP(outstanding)}. Adding this order's ${fmtPHP(thisOrderTotal)} would bring that to ${fmtPHP(wouldBe)} — ${fmtPHP(overBy)} over your ${fmtPHP(myRecord.creditLimit)} limit.</div>
-          <div style="font-size:15px;line-height:1.6;margin-top:8px;">To send this: pay down what you owe first, reduce this order's quantity, or ask ${po.supplierName} to raise your limit.</div>
-        </div>`;
-        document.getElementById('sendConfirmModal').dataset.poId = '';
-        document.getElementById('sendConfirmModal').classList.remove('hidden');
-        return;
-      }
+  // Credit limit check. Blocks the send entirely rather than just warning, since "enforcement"
+  // means the order genuinely doesn't go out until it's resolved. For a real account this reads
+  // the real per-connection limit (`supplier` above IS that real connection, loaded with its real
+  // credit_limit by loadMyConnections) — the old `=== ME_SUPPLIER` gate only ever matched the
+  // demo's one simulated relationship, so a real buyer's credit limit was never enforced at all.
+  const creditLimit = myBusiness ? (supplier ? supplier.creditLimit : null) : (po.supplierId === ME_SUPPLIER ? ((buyersData.find(b=>b.id===ME_BUYER)||{}).creditLimit) : null);
+  const creditBuyerId = myBusiness ? myBusiness.id : ME_BUYER;
+  if(creditLimit){
+    const outstanding = getOutstandingBalanceWithParty(creditBuyerId, po.supplierId);
+    const thisOrderTotal = poTotal(po);
+    const wouldBe = outstanding + thisOrderTotal;
+    if(wouldBe > creditLimit){
+      const overBy = wouldBe - creditLimit;
+      document.getElementById('sendConfirmHeading').textContent = 'Order blocked — over credit limit';
+      document.getElementById('sendConfirmYesBtn').classList.add('hidden');
+      document.getElementById('sendConfirmApprovalBtn').classList.add('hidden');
+      document.getElementById('sendConfirmCancelBtn').textContent = 'Close';
+      document.getElementById('sendConfirmText').innerHTML = `<div style="padding:12px 14px;background:var(--danger-soft);border:1.5px solid var(--danger);border-radius:10px;">
+        <div style="font-weight:800;color:var(--danger);margin-bottom:8px;">This order can't be sent — it would go over your credit limit with ${po.supplierName}.</div>
+        <div style="font-size:15px;line-height:1.6;">You currently owe ${fmtPHP(outstanding)}. Adding this order's ${fmtPHP(thisOrderTotal)} would bring that to ${fmtPHP(wouldBe)} — ${fmtPHP(overBy)} over your ${fmtPHP(creditLimit)} limit.</div>
+        <div style="font-size:15px;line-height:1.6;margin-top:8px;">To send this: pay down what you owe first, reduce this order's quantity, or ask ${po.supplierName} to raise your limit.</div>
+      </div>`;
+      document.getElementById('sendConfirmModal').dataset.poId = '';
+      document.getElementById('sendConfirmModal').classList.remove('hidden');
+      return;
     }
   }
   // Spending approval — an Owner/General Manager can always send directly; anyone else sending
@@ -10949,14 +11022,20 @@ function saveCreatePO(sendNow){
       buyerId:ME_BUYER, buyerName: myBusiness ? myBusiness.name : 'Dela Cruz Hardware', supplierId, supplierName:supplier.name,
       type, status:'draft', taxRate:0.12,
       lineItems:JSON.parse(JSON.stringify(createPOLineItems)),
-      createdDate:'2026-08-26', requestedDeliveryDate:date, deliveryAddress:address, notes,
+      createdDate:APP_TODAY, requestedDeliveryDate:date, deliveryAddress:address, notes,
       // No HS code from the buyer — an empty hsCode here means "the supplier hasn't confirmed
       // the customs classification yet," which is the honest state, not a guessed one.
       shipping:null, customs: type==='freight' ? {hsCode:'', broker:'', clearanceStatus:'pending_documents', dutiesEstimate:0} : null,
       invoice:null, counter:null, deliveryConfirmation:null, atRisk:false, riskNote:'',
-      history:[{date:'2026-08-26', time:'9:45 AM', actor:'buyer', action:'Draft created'}],
+      history:[{date:APP_TODAY, time:'9:45 AM', actor:'buyer', action:'Draft created'}],
     };
     purchaseOrders.push(newPO);
+    // poLogHistory (the usual sync chokepoint) isn't called here since the history entry above
+    // is already set — calling it too would just duplicate "Draft created." Without SOME sync
+    // call here, a real account's saved-but-not-sent draft never reached Supabase at all and
+    // silently disappeared the next time loadRealPurchaseOrders()/a Realtime event replaced the
+    // local purchaseOrders array (e.g. on reload).
+    syncPoToSupabase(newPO);
     if(sendNow){ closeCreatePOModal(); openSendConfirmModal(newPO.id); return; }
     else { renderOrdersTable(); }
   }
@@ -11599,13 +11678,30 @@ function acknowledgePartialDelivery(id){
   renderSupplierOrdersTable();
   if(document.getElementById('orderRows')) renderOrdersTable();
 }
+let invoiceIdCounter = 400;
+// Real buyer payment terms are free text ("Net 30", "COD", "50% deposit, balance on shipment")
+// — a "Net N" pattern is parsed for a real day count; anything else falls back to a plain 30
+// days, which is still an actual computed date rather than a literal that never moves.
+function computeInvoiceDueDate(po){
+  const buyer = buyersData.find(b=>b.id===po.buyerId);
+  const match = buyer && buyer.paymentTerms ? buyer.paymentTerms.match(/net\s*(\d+)/i) : null;
+  const days = match ? parseInt(match[1],10) : 30;
+  const base = new Date(APP_TODAY+'T00:00:00');
+  base.setDate(base.getDate()+days);
+  return base.getFullYear()+'-'+String(base.getMonth()+1).padStart(2,'0')+'-'+String(base.getDate()).padStart(2,'0');
+}
 function issueInvoice(id){
   const po = getPO(id);
   snapshotPO(po);
   po._undoLabel = 'Invoice issued.';
   // Section 7 #11 — the invoice carries its own stated total (as a supplier would actually type
   // it), separately from the PO's own computed total, so a VAT/total mismatch can be caught.
-  po.invoice = {number:'INV-2026-0'+(400+Math.floor(Math.random()*99)), dueDate:'2026-09-25', status:'unpaid', attachmentName:null, statedTotal: poTotal(po)};
+  // The number was previously a random 2-digit suffix with no uniqueness check — a real supplier
+  // issuing more than a couple of invoices could and would collide on the same number. The due
+  // date was a fixed literal (2026-09-25) that never reflected the real buyer's actual terms or
+  // even moved with the real calendar, so every invoice ever issued eventually just looked overdue.
+  invoiceIdCounter++;
+  po.invoice = {number:'INV-2026-0'+invoiceIdCounter, dueDate: myBusiness ? computeInvoiceDueDate(po) : '2026-09-25', status:'unpaid', attachmentName:null, statedTotal: poTotal(po)};
   // A deposit already paid before fulfillment started, and/or cash collected COD right at
   // delivery, both count toward this invoice from the moment it's issued — carried over as real
   // payment records, not charged again.
@@ -13828,13 +13924,19 @@ function renderScores(list, title){
 // benchmark shows a snapshot of what others charge right now — but nothing ever showed how a
 // product's own price has actually moved over time. Built from real order line-item prices, in
 // the order they were actually charged, not an estimate.
-function computePriceHistory(productName){
-  const orders = [...purchaseOrders].filter(po => (po.buyerId===ME_BUYER || po.supplierId===ME_SUPPLIER)
+function computePriceHistory(productName, partyId, isSupplierRole){
+  // Scoped to the ONE counterparty this history is being shown for — without partyId, this
+  // pulled in every order across every supplier/buyer that happened to use the same product
+  // name, blending prices actually charged by a different counterparty into what's shown as
+  // "this supplier's" price trend.
+  const matchesParty = po => partyId==null ? (po.buyerId===ME_BUYER || po.supplierId===ME_SUPPLIER)
+    : isSupplierRole ? (po.supplierId===ME_SUPPLIER && po.buyerId===partyId) : (po.supplierId===partyId && po.buyerId===ME_BUYER);
+  const orders = [...purchaseOrders].filter(po => matchesParty(po)
     && po.status!=='draft' && po.status!=='cancelled' && po.lineItems.some(li=>li.product===productName))
     .sort((a,b)=>(a.createdDate||'').localeCompare(b.createdDate||''));
   return orders.map(po => ({date: po.createdDate, price: po.lineItems.find(li=>li.product===productName).unitPrice, poNumber: po.poNumber}));
 }
-function togglePriceHistoryChart(partyId, product){
+function togglePriceHistoryChart(partyId, product, isSupplierRole){
   const key = partyId+'_'+product.replace(/[^a-zA-Z0-9]/g,'_');
   const row = document.getElementById('priceHistoryRow_'+key);
   const container = document.getElementById('priceHistoryChart_'+key);
@@ -13842,7 +13944,7 @@ function togglePriceHistoryChart(partyId, product){
   const wasHidden = row.classList.contains('hidden');
   row.classList.toggle('hidden');
   if(!wasHidden){ container.innerHTML = ''; return; }
-  const history = computePriceHistory(product);
+  const history = computePriceHistory(product, partyId, isSupplierRole);
   if(history.length < 2){
     container.innerHTML = `<div style="padding:10px;font-size:14.5px;color:var(--ink);opacity:.7;">Not enough order history for ${product} yet to show a trend.</div>`;
     return;
@@ -14814,6 +14916,7 @@ function logAudit(action, entityType, entityId, field, oldValue, newValue, actor
       const me = getActiveTeamMembers().find(m=>m.id===currentUserId);
       if(me) return me.name;
     }
+    if(typeof myBusiness!=='undefined' && myBusiness) return myBusiness.name;
     return (typeof currentAppRole!=='undefined' && currentAppRole==='buyer') ? 'Dela Cruz Hardware' : 'Metro Steel Co.';
   };
   NiftiDB.auditLog.push({
@@ -17607,7 +17710,9 @@ NiftiDB.referrals = {code:null, invited:[]}; // persisted — see collectNiftiPe
 const REFERRAL_SIMULATED_NAMES = ['Bataan Hardware Supply','Rizal Fasteners Inc.','Quezon Builders Depot','Laguna Steel Traders'];
 function ensureReferralCode(){
   if(NiftiDB.referrals.code) return NiftiDB.referrals.code;
-  const base = currentAppRole==='buyer' ? 'DELACRUZ' : 'METROSTEEL';
+  const base = myBusiness
+    ? (myBusiness.name.replace(/[^A-Za-z0-9]/g,'').toUpperCase().slice(0,12) || 'BUSINESS')
+    : (currentAppRole==='buyer' ? 'DELACRUZ' : 'METROSTEEL');
   NiftiDB.referrals.code = 'NIFTI-'+base+'-'+Math.floor(1000+Math.random()*8999);
   scheduleNiftiSave();
   return NiftiDB.referrals.code;
@@ -19198,6 +19303,7 @@ function collectNiftiPersistableState(){
     currentAppRole, currentUserId, currentLanguage,
     whLabel, supplyLocationLabel,
     taxProfiles,
+    sharedContact,
     priceProtectionTally,
     currencyDisplayPref,
     approvalThreshold,
@@ -19231,6 +19337,7 @@ function applyNiftiPersistedState(s){
   myCatalog = s.myCatalog || myCatalog;
   myCatalogPublic = (typeof s.myCatalogPublic === 'boolean') ? s.myCatalogPublic : myCatalogPublic;
   taxProfiles = s.taxProfiles || taxProfiles;
+  sharedContact = s.sharedContact || sharedContact;
   priceProtectionTally = s.priceProtectionTally || priceProtectionTally;
   currencyDisplayPref = s.currencyDisplayPref || currencyDisplayPref;
   approvalThreshold = (s.approvalThreshold !== undefined) ? s.approvalThreshold : approvalThreshold;
@@ -19454,6 +19561,10 @@ async function initNiftiApp(){
   updateInventoryNavBadge();
   updateSalesNavVisibility();
   updateAnnounceButtonVisibility();
+  const sharedContactNameEl = document.getElementById('settingsSharedContactName');
+  const sharedContactPhoneEl = document.getElementById('settingsSharedContactPhone');
+  if(sharedContactNameEl) sharedContactNameEl.value = sharedContact.name || '';
+  if(sharedContactPhoneEl) sharedContactPhoneEl.value = sharedContact.phone || '';
   checkStaleUnconfirmedOrders();
   updatePushLogBadge();
   syncMyCatalogToBuyerReference(); // so the supplier's existing catalog is visible to buyers immediately, no order required
