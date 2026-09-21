@@ -1764,7 +1764,6 @@
     <div class="faq-item"><div class="q">Do my suppliers need to pay anything?</div><div class="a">Never. Suppliers use Nifti free regardless of your plan — that's exactly why they say yes to your invite.</div></div>
     <div class="faq-item"><div class="q">What happens if I outgrow Starter?</div><div class="a">You'll see it coming before you hit the limit. Upgrading is one click, no data loss.</div></div>
     <div class="faq-item"><div class="q">What happens to my existing orders and suppliers if I downgrade?</div><div class="a">Nothing is deleted, ever. If you go over a lower plan's supplier limit, your existing connections and full order history stay exactly as they are — you just can't add new supplier connections beyond the limit until you upgrade again or disconnect one.</div></div>
-    <div class="faq-item"><div class="q">What does "connect to other business software" actually mean?</div><div class="a">If your business already uses accounting or inventory software, we can link Nifti to it so information flows between them automatically instead of you re-typing it. This is a Business-tier feature set up together with our team — nothing to configure yourself.</div></div>
   </div>
 </section>
 
@@ -16499,6 +16498,11 @@ const PLAN_DEFINITIONS = [
     birDocuments:true, reorderTools:true, financialReports:true, autoReplenishment:true, deliveryRoute:true, creditLimits:true,
     features:['Everything in Business','Custom contract & SLA','Hands-on onboarding','Volume-based pricing','API access (planned)']},
 ];
+// Business/Enterprise stay fully defined above (getEffectivePlanId() relies on the 'enterprise'
+// entry for the free-forever supplier promise — see its comment) but are hidden from every
+// buyer-facing plan listing for now. Nothing in PLAN_DEFINITIONS itself changes, so re-enabling
+// later is just removing this filter, not rebuilding the tiers.
+const VISIBLE_PLAN_DEFINITIONS = PLAN_DEFINITIONS.filter(p => ['starter','essential','growth'].includes(p.id));
 const PLAN_ANNUAL_DISCOUNT = 0.17; // "Yearly — save ~17%", matches the existing pricing-page toggle copy
 function planAnnualMonthlyEquivalent(plan){ return plan.priceMonthly==null ? null : Math.round(plan.priceMonthly*(1-PLAN_ANNUAL_DISCOUNT)); }
 function getPlanDef(id){ return PLAN_DEFINITIONS.find(p=>p.id===id) || PLAN_DEFINITIONS[0]; }
@@ -16645,7 +16649,7 @@ function planActionLabel(plan, currentPlanId){
 function renderMarketingPricingGrid(){
   const el = document.getElementById('marketingPlanGrid');
   if(!el) return;
-  el.innerHTML = PLAN_DEFINITIONS.map(p=>planCardHtml(p, {mode:'marketing'})).join('');
+  el.innerHTML = VISIBLE_PLAN_DEFINITIONS.map(p=>planCardHtml(p, {mode:'marketing'})).join('');
 }
 function renderBillingSettings(){
   const el = document.getElementById('billingPlanContent');
@@ -16669,7 +16673,7 @@ function renderBillingSettings(){
       <button class="${pricingBillingCycle==='annual'?'active':''}" onclick="setBilling('annual', this); renderBillingSettings();">Yearly — save ~17%</button>
     </div>
     <div class="plan-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;">
-      ${PLAN_DEFINITIONS.map(p=>planCardHtml(p, {mode:'settings', currentPlanId: sub.planId})).join('')}
+      ${VISIBLE_PLAN_DEFINITIONS.map(p=>planCardHtml(p, {mode:'settings', currentPlanId: sub.planId})).join('')}
     </div>
     ${sub.planId!=='starter' && sub.status!=='cancelled' ? `<div style="margin-top:14px;"><span class="row-action" style="color:var(--danger);" onclick="openCancelSubscriptionForm()">Cancel subscription</span></div><div id="cancelSubForm"></div>` : ''}
     <div id="planSwitchConfirm"></div>
