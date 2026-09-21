@@ -2317,7 +2317,7 @@
             <div class="msg-po-tabs" id="msgPoTabs"></div>
             <div id="msgPoSummaryCard"></div>
             <div class="msg-thread-body" id="threadBody"></div>
-            <div style="padding:2px 20px;font-size:13px;text-align:center;"><span class="row-action" onclick="simulateThreadReply()">Simulate: they reply →</span></div>
+            <div id="simulateThreadReplyRow" style="padding:2px 20px;font-size:13px;text-align:center;"><span class="row-action" onclick="simulateThreadReply()">Simulate: they reply →</span></div>
             <div class="msg-composer">
               <div id="attachPreview"></div>
               <div class="composer-row">
@@ -3254,6 +3254,116 @@ function subscribeToPurchaseOrders(){
   });
 }
 
+/* ============ REAL CHAT SYNC (Supabase-backed conversations/conversation_messages) ============
+   Same shape-preserving approach as the PO sync above: every existing chat render function
+   (renderThread, renderConversationList, renderMsgPoTabs, capConversationMessages, etc.) keeps
+   reading buyerConversations/supplierConversations in exactly the shape it always has —
+   {id, name, category, initials, unread, messages:[{from,text,time,date,poRef,attachment}]}.
+   What changes for a real signed-in account is where that array's CONTENTS come from (Supabase
+   instead of hardcoded demo seed) and where a new message also goes (a real insert, not just a
+   local push). Demo/unauthenticated sessions (myBusiness===null) never touch any of this. */
+function newMessageId(){
+  return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'msg_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+}
+// po_id (a real PO's UUID) maps back to that PO's poNumber — every existing chat render function
+// already keys off poNumber (a string like "PO-2026-0765"), not a raw id, via msgPoFilter/the
+// PO-tab row, so this keeps that whole layer unchanged instead of teaching it a second id format.
+function mapMessageRowToJs(row, myBusinessId){
+  const po = row.po_id ? purchaseOrders.find(p=>p.id===row.po_id) : null;
+  const sentDate = new Date(row.sent_at);
+  return {
+    id: row.id,
+    from: row.sender_business_id === myBusinessId ? 'me' : 'them',
+    text: row.text || '',
+    time: sentDate.toLocaleString('en-PH', {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}),
+    date: row.sent_at.slice(0,10),
+    poRef: po ? po.poNumber : undefined,
+    attachment: row.attachment || undefined,
+  };
+}
+async function loadMyConversations(){
+  if(!myBusiness) return;
+  const col = myBusiness.type === 'buyer' ? 'buyer_business_id' : 'supplier_business_id';
+  const { data: convRows, error } = await sb.from('conversations').select('*').eq(col, myBusiness.id);
+  if(error || !convRows) { console.warn('Could not load conversations:', error && error.message); return; }
+  const mapped = await Promise.all(convRows.map(async (c) => {
+    const counterpartId = myBusiness.type === 'buyer' ? c.supplier_business_id : c.buyer_business_id;
+    const name = (await getBusinessName(counterpartId)) || 'Unknown business';
+    const { data: msgRows } = await sb.from('conversation_messages').select('*').eq('conversation_id', c.id).order('sent_at');
+    return {
+      id: c.id, // a real conversation UUID — selectConversation()/activeConvId already just treat conv.id as an opaque key, so this is a drop-in
+      counterpartId,
+      name, category: '',
+      initials: name.split(' ').map(w=>w[0]).filter(Boolean).slice(0,2).join('').toUpperCase() || '?',
+      unread: myBusiness.type === 'buyer' ? c.buyer_unread_count : c.supplier_unread_count,
+      messages: (msgRows||[]).map(r=>mapMessageRowToJs(r, myBusiness.id)),
+    };
+  }));
+  const target = myBusiness.type === 'buyer' ? buyerConversations : supplierConversations;
+  target.length = 0;
+  target.push(...mapped);
+}
+async function sendRealMessage(conv, localMsg){
+  if(!myBusiness) return;
+  const poRow = localMsg.poRef ? purchaseOrders.find(p=>p.poNumber===localMsg.poRef) : null;
+  try{
+    const { error } = await sb.from('conversation_messages').insert({
+      id: localMsg.id, conversation_id: conv.id, sender_business_id: myBusiness.id,
+      text: localMsg.text, po_id: poRow ? poRow.id : null, attachment: localMsg.attachment || null,
+    });
+    if(error){ console.warn('Message not saved to server:', error.message); return; }
+    const target = myBusiness.type === 'buyer' ? 'supplier' : 'buyer';
+    await sb.rpc('increment_conversation_unread', { p_conversation_id: conv.id, p_target: target });
+  }catch(e){ console.warn('Message send failed:', e); }
+}
+// Mirrors the read locally (conv.unread = 0, set in selectConversation()) back to Supabase, so
+// the other side's unread badge for this thread is accurate next time they load their list.
+async function markConversationReadRemote(conv){
+  if(!myBusiness || !conv || typeof conv.id !== 'string' || !conv.id.includes('-')) return; // real conversation ids are UUIDs; demo ids ('metro', etc.) are not
+  const col = myBusiness.type === 'buyer' ? 'buyer_unread_count' : 'supplier_unread_count';
+  const { error } = await sb.from('conversations').update({ [col]: 0 }).eq('id', conv.id);
+  if(error) console.warn('Could not mark conversation read on server:', error.message);
+}
+let chatRealtimeChannels = [];
+function subscribeToConversations(){
+  if(!myBusiness) return;
+  chatRealtimeChannels.forEach(ch => sb.removeChannel(ch));
+  chatRealtimeChannels = [];
+  const onMessageChange = (payload) => {
+    const row = payload.new;
+    if(!row || !row.conversation_id) return;
+    const conv = getConversations().find(c=>c.id===row.conversation_id);
+    if(!conv) return; // a message for a conversation this business isn't part of — RLS already prevents this, defensive only
+    const mapped = mapMessageRowToJs(row, myBusiness.id);
+    const idx = conv.messages.findIndex(m=>m.id===row.id);
+    if(idx>-1) conv.messages[idx] = mapped; else conv.messages.push(mapped);
+    if(activeConvId === conv.id) renderThread(conv);
+    renderConversationList();
+    updateMessagesBadge();
+    if(mapped.from==='them') fireRealChatNotification(conv.name, mapped.text);
+  };
+  const onConversationChange = (payload) => {
+    const row = payload.new;
+    if(!row) return;
+    const conv = getConversations().find(c=>c.id===row.id);
+    if(!conv) { loadMyConversations().then(()=>{ renderConversationList(); }); return; } // a brand-new conversation (e.g. an invite just got accepted) — reload the list to pick it up
+    conv.unread = myBusiness.type === 'buyer' ? row.buyer_unread_count : row.supplier_unread_count;
+    renderConversationList();
+    updateMessagesBadge();
+  };
+  chatRealtimeChannels.push(
+    sb.channel('conv-messages-'+myBusiness.id)
+      .on('postgres_changes', {event:'INSERT', schema:'public', table:'conversation_messages'}, onMessageChange)
+      .subscribe(),
+    sb.channel('conv-changes-'+myBusiness.id+'-buyer')
+      .on('postgres_changes', {event:'*', schema:'public', table:'conversations', filter:`buyer_business_id=eq.${myBusiness.id}`}, onConversationChange)
+      .subscribe(),
+    sb.channel('conv-changes-'+myBusiness.id+'-supplier')
+      .on('postgres_changes', {event:'*', schema:'public', table:'conversations', filter:`supplier_business_id=eq.${myBusiness.id}`}, onConversationChange)
+      .subscribe(),
+  );
+}
+
 async function handleSignIn(){
   const email = document.getElementById('signinEmail').value.trim();
   const password = document.getElementById('pwSignin').value;
@@ -3312,6 +3422,10 @@ function applyRealAccountUI(){
     const av = chip.querySelector('.avatar');
     if(av) av.textContent = myBusiness.name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
   });
+  // Chat is real now for a signed-in account — this demo-only button injects a fake canned
+  // reply into what's actually a real conversation with a real counterpart business.
+  const simRow = document.getElementById('simulateThreadReplyRow');
+  if(simRow) simRow.classList.add('hidden');
 }
 
 /* ============ NAVIGATION ============ */
@@ -4990,6 +5104,12 @@ function removeEditBatch(code, idx){
 // actually reviewing and hitting Send — this only saves the busywork of drafting it.
 function autoDraftReorderIfNeeded(item){
   if(item.status !== 'critical') return;
+  // Fires implicitly from background logic (adding/editing an inventory item), not a direct
+  // click — a real entitlement gate, but checked directly rather than via
+  // requireAutoReplenishmentEntitlement(), which would pop an unprompted upgrade dialog in the
+  // middle of an unrelated save. Below Growth this just silently doesn't auto-draft, same as the
+  // feature not existing for that plan.
+  if(!getEffectivePlan().autoReplenishment) return;
   if(item.autoReorderDraftId){
     const existing = purchaseOrders.find(p=>p.id===item.autoReorderDraftId);
     if(existing && existing.status==='draft') return; // already have one waiting
@@ -5947,6 +6067,7 @@ function selectConversation(id){
   activeConvId = id;
   const conv = getConversations().find(c=>c.id===id);
   conv.unread = 0;
+  if(myBusiness) markConversationReadRemote(conv);
   const body = document.getElementById('threadBody');
   if(body) body.dataset.filesView = '0';
   renderConversationList();
@@ -6082,13 +6203,18 @@ function sendMessage(){
   const text = input.value.trim();
   if(!text && !pendingAttachment) return;
   const conv = getConversations().find(c=>c.id===activeConvId);
-  const today = new Date(2026,7,26);
+  // The demo world's "today" is a fixed date (APP_TODAY) so its seed data stays internally
+  // consistent — but a real account's messages need their real send date, not that fixed demo
+  // date, or every date-based thing downstream (message-filter date range, "Active today"
+  // presence) would be wrong for them.
+  const today = myBusiness ? new Date() : new Date(2026,7,26);
   const dateStr = today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
   // Sending while a specific PO's tab is open tags the message with that PO — otherwise it was
   // only ever visible under "All messages," making the PO tab look dead/broken the moment
   // someone actually used it to have a conversation instead of just reading old history.
   const poRef = msgPoFilter !== 'all' ? msgPoFilter : undefined;
-  conv.messages.push({from:'me', text: text, time:'Just now', date: dateStr, attachment: pendingAttachment, poRef, _pendingSync: isOffline});
+  const newMsg = {id: newMessageId(), from:'me', text: text, time:'Just now', date: dateStr, attachment: pendingAttachment, poRef, _pendingSync: isOffline};
+  conv.messages.push(newMsg);
   capConversationMessages(conv);
   input.value = '';
   input.style.height = 'auto';
@@ -6097,6 +6223,7 @@ function sendMessage(){
   document.getElementById('fileInput').value = '';
   renderThread(conv);
   renderConversationList();
+  if(myBusiness) sendRealMessage(conv, newMsg);
 }
 // ---- Mass announcement to all buyers (supplier-only) ----
 // One message individually re-typed to every buyer relationship is exactly the kind of thing
@@ -8957,6 +9084,10 @@ function submitRmaCreditNote(id){
   const po = getPO(id);
   const amount = Number(document.getElementById('rmaCreditAmount_'+id).value);
   if(!amount || amount<=0){ markFieldInvalid('rmaCreditAmount_'+id, 'Please enter a valid credit amount.'); return; }
+  if(po.invoice){
+    const {balance} = computeInvoicePayments(po);
+    if(amount > balance){ markFieldInvalid('rmaCreditAmount_'+id, 'This is more than the remaining balance ('+fmtPHP(balance)+') — a credit note can\'t exceed what\'s actually owed.'); return; }
+  }
   const profile = taxProfiles.supplier;
   const cnNumber = profile.nextCnNumber;
   profile.nextCnNumber += 1;
@@ -9136,8 +9267,11 @@ function printDocPreview(){ window.print(); }
 function generateDeliveryReceipt(id){
   const po = getPO(id);
   // Same "assign once, freeze forever" numbering as the Sales Invoice — a DR number has to
-  // stay fixed to one delivery, not drift each time it's reprinted.
+  // stay fixed to one delivery, not drift each time it's reprinted. Same entitlement gate too:
+  // "BIR-ready Sales Invoices, Delivery Receipts & VAT tracking" is one bundled Essential+
+  // promise: the Sales Invoice side already checked this, the Delivery Receipt side hadn't.
   if(!po.deliveryReceiptNumber){
+    if(!requireBirDocumentsEntitlement()) return;
     const profile = taxProfiles.supplier;
     po.deliveryReceiptNumber = profile.nextDrNumber;
     profile.nextDrNumber += 1;
@@ -10227,6 +10361,7 @@ function submitRecordPayment(id){
   const file = fileInput && fileInput.files[0];
   const {balance} = computeInvoicePayments(po);
   if(!amount || amount <= 0){ markFieldInvalid('payAmount_'+id, 'Please enter a valid amount.'); return; }
+  if(amount > balance){ markFieldInvalid('payAmount_'+id, 'This is more than the remaining balance ('+fmtPHP(balance)+'). Enter the actual amount received.'); return; }
   if(method !== 'cash' && !reference){ markFieldInvalid('payRef_'+id, 'Please enter the '+(method==='check'?'check number':'reference number')+' — that\'s what makes this reconcilable later, not just the photo.'); return; }
   if(method==='check' && !checkDate){ markFieldInvalid('payCheckDate_'+id, 'Please enter the check date.'); return; }
   if(!file && balance > PAYMENT_PROOF_REQUIRED_THRESHOLD){
@@ -11058,6 +11193,7 @@ function submitShip(id){
     po.shipping = {carrier, tracking: tracking || '—', eta, proofUrl, proofName};
     po.status = po.type==='freight' ? 'in_customs' : 'shipped';
     if(po.type==='freight' && !po.customs){ po.customs = {hsCode:'', broker:'', clearanceStatus:'pending_documents', dutiesEstimate:0}; }
+    advanceFreightMilestonesToStatus(po);
     poLogHistory(po, 'supplier', 'Marked as shipped ('+carrier+')');
     renderSupplierOrdersTable(); renderSupplierFulfillmentDashboard(true);
     if(po.buyerId===ME_BUYER){ pushBuyerInboxItem({title:po.poNumber+' has shipped', meta:carrier+' · ETA '+eta, pillLabel:'Shipped', pillClass:'pill-info', poId:po.id}); if(document.getElementById('orderRows')) renderOrdersTable(); }
@@ -11115,6 +11251,31 @@ function initFreightMilestones(po){
       return {key, status:'current', date:null, time:null};
     }
     return {key, status:'pending', date:null, time:null};
+  });
+}
+// Keeps the granular milestone timeline in sync whenever a coarse status jump happens through
+// submitShip()/submitCustoms() (as opposed to the timeline's own "Mark complete" buttons, which
+// only ever moved it forward one step at a time via advanceFreightMilestone()). Previously status
+// could jump straight to 'in_customs'/'shipped' while the timeline stayed wherever it was last
+// (often still "Picked up by carrier"), showing two contradicting views of the same shipment with
+// nothing to ever reconcile them. Only ever advances, never regresses — if granular progress is
+// already further along than what the coarse status implies, it's left alone.
+function advanceFreightMilestonesToStatus(po){
+  if(po.type !== 'freight') return;
+  if(!po.freightMilestones){ initFreightMilestones(po); return; }
+  const target = FREIGHT_STAGE_INDEX[po.status] !== undefined ? FREIGHT_STAGE_INDEX[po.status] : 0;
+  const currentDoneCount = po.freightMilestones.filter(m=>m.status==='done').length;
+  if(target <= currentDoneCount) return;
+  const startDate = new Date(po.createdDate+'T09:00:00');
+  po.freightMilestones = po.freightMilestones.map((m,i)=>{
+    if(i < target && m.status !== 'done'){
+      const d = new Date(startDate); d.setDate(d.getDate()+i);
+      const hh = 8 + ((i*3) % 10);
+      return Object.assign({}, m, {status:'done', date: m.date || d.toISOString().slice(0,10), time: m.time || String(hh).padStart(2,'0')+':00'});
+    } else if(i === target && m.status==='pending'){
+      return Object.assign({}, m, {status:'current'});
+    }
+    return m;
   });
 }
 function confirmAdvanceFreightMilestone(id, side, key){
@@ -11270,7 +11431,7 @@ function submitCustoms(id){
     clearanceStatus: document.getElementById('customsStatus_'+id).value,
     dutiesEstimate: Number(document.getElementById('customsDuties_'+id).value) || 0,
   };
-  if(po.customs.clearanceStatus==='cleared') po.status = 'shipped';
+  if(po.customs.clearanceStatus==='cleared'){ po.status = 'shipped'; advanceFreightMilestonesToStatus(po); }
   poLogHistory(po, 'supplier', 'Updated customs status: '+po.customs.clearanceStatus.replace('_',' '));
   renderSupplierOrdersTable();
   if(document.getElementById('orderRows')) renderOrdersTable();
@@ -12249,13 +12410,24 @@ function sendInvite(){
   }
   commitSendInvite(name);
 }
-function commitSendInvite(name){
+async function commitSendInvite(name){
   const row = document.createElement('div');
   row.className = 'invite-row';
   row.innerHTML = `<div><div class="invite-name">${name}</div><div class="invite-meta">Sent just now via ${selectedChannels.join(' + ')}</div></div><div style="display:flex;align-items:center;gap:14px;"><span class="status-pill pill-sent">Pending</span><span class="row-action" onclick="editInvite(${jsStringLiteral(name)})">Edit</span><span class="row-action" style="color:var(--danger);" onclick="deleteInvite(this)">Delete</span></div>`;
   document.querySelector('#page-invite .status-list').appendChild(row);
   document.getElementById('channelConfirm').innerHTML = `✓ Sent via ${selectedChannels.join(' + ')}.`;
   trackEvent('supplier_invite_sent', {count:1, channels:selectedChannels});
+  // Real accounts also create a real, matchable invite — this is what actually connects two
+  // businesses (see handle_new_user()'s business_invites check): when that supplier signs up
+  // with this email, business_relationships + a real conversation get created automatically.
+  // Demo mode has no email captured here to invite against, so this only ever fires signed in.
+  if(myBusiness){
+    const email = (document.getElementById('supEmail')?.value || '').trim();
+    if(email){
+      const { error } = await sb.from('business_invites').insert({ inviting_business_id: myBusiness.id, invited_email: email });
+      if(error && error.code !== '23505'){ console.warn('Real supplier invite not sent:', error.message); } // 23505 = already invited, not a real failure
+    }
+  }
 }
 // Section 6 #15 — bulk invite from contacts
 const MOCK_CONTACTS = [
@@ -14376,6 +14548,7 @@ function submitStockAdjustment(code){
 // difference in one batch, each logged as a proper count-correction adjustment.
 let stocktakeSession = null;
 function startStocktake(){
+  if(!requirePermission('editInventory')) return;
   stocktakeSession = {warehouse:'all', counts:{}};
   document.getElementById('inventoryMainView').classList.add('hidden');
   document.getElementById('stocktakeView').classList.remove('hidden');
@@ -14465,6 +14638,7 @@ function refreshStocktakeVarianceCell(code){
   cell.style.color = delta<0 ? 'var(--danger)' : (delta>0 ? 'var(--green)' : '');
 }
 function commitStocktake(){
+  if(!requirePermission('editInventory')) return;
   if(!stocktakeSession){ showToast('Start a stocktake first.'); return; }
   const codes = Object.keys(stocktakeSession.counts);
   if(!codes.length){ showToast('No differences entered — nothing to commit.'); return; }
@@ -14507,6 +14681,7 @@ function applySupplyStockAdjustment(code, newQty, reasonCode, note){
 }
 let supplyStocktakeSession = null;
 function startSupplyStocktake(){
+  if(!requirePermission('editInventory')) return;
   supplyStocktakeSession = {location:'all', counts:{}};
   document.getElementById('supplyMainView').classList.add('hidden');
   document.getElementById('supplyStocktakeView').classList.remove('hidden');
@@ -14600,6 +14775,7 @@ function refreshSupplyStocktakeVarianceCell(code){
   cell.style.color = delta<0 ? 'var(--danger)' : (delta>0 ? 'var(--green)' : '');
 }
 function commitSupplyStocktake(){
+  if(!requirePermission('editInventory')) return;
   if(!supplyStocktakeSession){ showToast('Start a stocktake first.'); return; }
   const codes = Object.keys(supplyStocktakeSession.counts);
   if(!codes.length){ showToast('No differences entered — nothing to commit.'); return; }
@@ -14856,6 +15032,11 @@ function detectInvoiceTotalMismatches(){
   return issues;
 }
 function refreshDataQualityIssues(){
+  // Backfills _meta on anything created since the last call (attachTrustMetadata() only ever
+  // ran once, at boot) — every detector below, and every Explore Records row, reads ._meta
+  // unconditionally. Idempotent and cheap (no-ops on anything that already has it), so calling
+  // it defensively here is safe regardless of what changed.
+  attachTrustMetadata();
   NiftiDB.dataQualityIssues = [
     ...detectPriceConflicts(),
     ...detectStaleRecords(30),
@@ -15109,6 +15290,7 @@ function toggleDcExploreGrouping(el){
   renderDataCenterExplore();
 }
 function getDcExploreRows(){
+  attachTrustMetadata(); // same defensive backfill as refreshDataQualityIssues() — every row below reads ._meta unconditionally
   const isSupplierRole = currentAppRole === 'supplier';
   const rows = [];
   (isSupplierRole ? supplyData : inventoryData).forEach(item => {
@@ -18715,6 +18897,8 @@ async function bootNifti(){
   if(signedIn){
     await loadRealPurchaseOrders();
     subscribeToPurchaseOrders();
+    await loadMyConversations();
+    subscribeToConversations();
     applyRealAccountUI();
     navigate('dashboard');
   }
