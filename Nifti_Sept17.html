@@ -3125,6 +3125,7 @@ async function loadMyBusinessContext(){
   // replaced below by this business's own saved copy, if it has one.
   NIFTI_STORAGE_KEY = 'nifti-app-state-v1:biz-' + myBusiness.id;
   await loadMyTeamRoster();
+  await loadMyCustomRoles();
   return true;
 }
 // Replaces the hardcoded teamMembers/supplierTeamMembers demo rosters with this business's real
@@ -3134,6 +3135,14 @@ async function loadMyTeamRoster(){
   if(error || !data) return;
   const roster = data.map(m => ({ id:m.id, name:m.name, email:m.email, roles:m.roles, status:m.status }));
   if(myBusiness.type === 'supplier') supplierTeamMembers = roster; else teamMembers = roster;
+}
+// Replaces the local-only customRoles seed with this business's real custom_roles rows — without
+// this, a custom role and who holds it could disagree across devices (defined here, assigned in
+// Supabase), silently locking that person out anywhere but the browser that created the role.
+async function loadMyCustomRoles(){
+  const { data, error } = await sb.from('custom_roles').select('*').eq('business_id', myBusiness.id).order('created_at');
+  if(error || !data) return;
+  customRoles = data.map(r => ({ name:r.name, allowedPages:r.allowed_pages, rowId:r.id }));
 }
 
 /* ============ PURCHASE ORDER SYNC (Phase 4, batch 1) ============
@@ -3313,6 +3322,25 @@ async function loadMyConnections(){
   target.length = 0;
   target.push(...mapped);
 }
+// Without this, My Suppliers/My Buyers only ever picks up a newly-accepted invite on a full
+// reload — the conversation for it already appears live (see subscribeToConversations's own
+// comment on this), but the relationship row itself did not, until now.
+let businessRelationshipsChannels = [];
+function subscribeToBusinessRelationships(){
+  if(!myBusiness) return;
+  businessRelationshipsChannels.forEach(ch => sb.removeChannel(ch));
+  businessRelationshipsChannels = [];
+  const onChange = async () => {
+    await loadMyConnections();
+    renderSuppliersTable();
+  };
+  ['buyer_business_id','supplier_business_id'].forEach(col=>{
+    const ch = sb.channel('biz-rel-changes-'+col+'-'+myBusiness.id)
+      .on('postgres_changes', {event:'*', schema:'public', table:'business_relationships', filter:`${col}=eq.${myBusiness.id}`}, onChange)
+      .subscribe();
+    businessRelationshipsChannels.push(ch);
+  });
+}
 async function loadMyConversations(){
   if(!myBusiness) return;
   const col = myBusiness.type === 'buyer' ? 'buyer_business_id' : 'supplier_business_id';
@@ -3343,15 +3371,23 @@ async function loadMyConversations(){
 async function sendRealMessage(conv, localMsg){
   if(!myBusiness || !conv.conversationRowId) return;
   const poRow = localMsg.poRef ? purchaseOrders.find(p=>p.poNumber===localMsg.poRef) : null;
+  const markFailed = () => {
+    // Without this, a message that fails to reach the server while online (RLS denial, FK
+    // violation, a dropped request) looked identical to one that actually sent — it kept the
+    // "delivered" look right up until a reload silently dropped it, since loadMyConversations()
+    // rebuilds messages purely from what's actually in the database.
+    localMsg._pendingSync = true;
+    if(activeConvId === conv.id) renderThread(conv);
+  };
   try{
     const { error } = await sb.from('conversation_messages').insert({
       id: localMsg.id, conversation_id: conv.conversationRowId, sender_business_id: myBusiness.id,
       text: localMsg.text, po_id: poRow ? poRow.id : null, attachment: localMsg.attachment || null,
     });
-    if(error){ console.warn('Message not saved to server:', error.message); return; }
+    if(error){ console.warn('Message not saved to server:', error.message); markFailed(); return; }
     const target = myBusiness.type === 'buyer' ? 'supplier' : 'buyer';
     await sb.rpc('increment_conversation_unread', { p_conversation_id: conv.conversationRowId, p_target: target });
-  }catch(e){ console.warn('Message send failed:', e); }
+  }catch(e){ console.warn('Message send failed:', e); markFailed(); }
 }
 // Mirrors the read locally (conv.unread = 0, set in selectConversation()) back to Supabase, so
 // the other side's unread badge for this thread is accurate next time they load their list.
@@ -3463,6 +3499,14 @@ function applyRealAccountUI(){
   // reply into what's actually a real conversation with a real counterpart business.
   const simRow = document.getElementById('simulateThreadReplyRow');
   if(simRow) simRow.classList.add('hidden');
+  // The Invite a Supplier form ships with a hardcoded demo name/email baked into its HTML value
+  // attributes. Left alone, a real account could hit "Send" without touching the field and fire
+  // a real business_invites row at that demo email while the UI confirms success against the
+  // demo company name. Blank it so nothing goes out until the user actually enters someone real.
+  const supNameEl = document.getElementById('supName'); if(supNameEl) supNameEl.value = '';
+  const supEmailEl = document.getElementById('supEmail'); if(supEmailEl) supEmailEl.value = '';
+  if(typeof messageEdited !== 'undefined') messageEdited = false;
+  if(document.getElementById('chatPreview')) updatePreview();
 }
 
 /* ============ NAVIGATION ============ */
@@ -3902,6 +3946,12 @@ async function logOut(){
   await sb.auth.signOut();
   poRealtimeChannels.forEach(ch => sb.removeChannel(ch));
   poRealtimeChannels = [];
+  chatRealtimeChannels.forEach(ch => sb.removeChannel(ch));
+  chatRealtimeChannels = [];
+  rfqRealtimeChannels.forEach(ch => sb.removeChannel(ch));
+  rfqRealtimeChannels = [];
+  businessRelationshipsChannels.forEach(ch => sb.removeChannel(ch));
+  businessRelationshipsChannels = [];
   // A full reload, not just navigate('index') — this business's data (custom roles, tax
   // profile, notification settings, price agreements, and everything else this session loaded
   // into memory under its scoped storage key) needs to actually leave memory, not just have its
@@ -8059,7 +8109,7 @@ function openCreateCustomRoleForm(){
     <button class="btn btn-outline" style="margin-top:10px;" onclick="document.getElementById('createCustomRoleForm').innerHTML='';">Cancel</button>
   </div>`;
 }
-function saveCustomRole(){
+async function saveCustomRole(){
   if(!requirePermission('manageRoles')) return;
   const nameEl = document.getElementById('customRoleName');
   if(!nameEl) return; // form isn't open — nothing to submit
@@ -8068,17 +8118,37 @@ function saveCustomRole(){
   if(!name){ showToast('Please give this role a title.'); return; }
   if(!pages.length){ showToast('Please select at least one page this role can access.'); return; }
   if(getAllRoleNames().some(r=>r.toLowerCase()===name.toLowerCase())){ showToast('A role with this name already exists.'); return; }
-  customRoles.push({name, allowedPages: pages});
+  if(myBusiness){
+    const { data, error } = await sb.from('custom_roles').insert({ business_id: myBusiness.id, name, allowed_pages: pages }).select().single();
+    if(error){ showToast("Couldn't create that role — try again.", 'error'); return; }
+    customRoles.push({name: data.name, allowedPages: data.allowed_pages, rowId: data.id});
+  } else {
+    customRoles.push({name, allowedPages: pages});
+  }
   logAudit('custom_role_created', 'role', name, 'allowedPages', null, pages.join(', '));
   document.getElementById('createCustomRoleForm').innerHTML = '';
   renderCustomRolesList();
   showNotificationToast(`"${name}" role created.`);
 }
-function removeCustomRole(name){
+async function removeCustomRole(name){
   if(!requirePermission('manageRoles')) return;
-  customRoles = customRoles.filter(r=>r.name!==name);
+  const role = customRoles.find(r=>r.name===name);
   // Strip the removed role from anyone holding it — no one is left with a dangling role that no
   // longer maps to any real permission.
+  if(myBusiness){
+    const holders = getActiveTeamMembers().filter(m=>m.roles.includes(name));
+    if(role && role.rowId){
+      const { error } = await sb.from('custom_roles').delete().eq('id', role.rowId);
+      if(error){ showToast("Couldn't remove that role — try again.", 'error'); return; }
+    }
+    for(const m of holders){
+      const newRoles = m.roles.filter(r=>r!==name);
+      if(!newRoles.length) newRoles.push('Viewer');
+      await sb.from('team_members').update({ roles: newRoles }).eq('id', m.id);
+    }
+    await loadMyTeamRoster();
+  }
+  customRoles = customRoles.filter(r=>r.name!==name);
   teamMembers.forEach(m => { m.roles = m.roles.filter(r=>r!==name); if(!m.roles.length) m.roles=['Viewer']; });
   supplierTeamMembers.forEach(m => { m.roles = m.roles.filter(r=>r!==name); if(!m.roles.length) m.roles=['Viewer']; });
   logAudit('custom_role_removed', 'role', name, 'allowedPages', name, null);
@@ -12210,6 +12280,50 @@ function renderSupplierFulfillmentDashboard(refreshOnly){
 }
 
 
+/* ============ RFQ SYNC (real accounts) ============
+   Mirrors the purchase_orders/conversations sync pattern: rfqs stays the single array every
+   render function reads from; for a real account its contents come from Supabase and every
+   mutation (send/quote/accept/decline) writes back to it, so an RFQ sent to another real
+   business actually reaches their device instead of sitting only in the sender's own browser. */
+async function mapRfqRowToJs(row){
+  const buyerName = await getBusinessName(row.buyer_business_id);
+  const supplierName = await getBusinessName(row.supplier_business_id);
+  return {
+    id: row.id, rfqNumber: row.rfq_number,
+    buyerId: row.buyer_business_id, buyerName,
+    supplierId: row.supplier_business_id, supplierName,
+    items: row.items || [], neededByDate: row.needed_by_date, notes: row.notes || '',
+    status: row.status, quote: row.quote, history: row.history || [],
+  };
+}
+async function loadMyRfqs(){
+  const { data, error } = await sb.from('rfqs').select('*')
+    .or(`buyer_business_id.eq.${myBusiness.id},supplier_business_id.eq.${myBusiness.id}`)
+    .order('created_at');
+  if(error || !data) return;
+  const mapped = await Promise.all(data.map(mapRfqRowToJs));
+  rfqs.length = 0; rfqs.push(...mapped);
+}
+let rfqRealtimeChannels = [];
+function subscribeToRfqs(){
+  if(!myBusiness) return;
+  rfqRealtimeChannels.forEach(ch => sb.removeChannel(ch));
+  rfqRealtimeChannels = [];
+  async function onChange(payload){
+    if(payload.eventType === 'DELETE') return;
+    const mapped = await mapRfqRowToJs(payload.new);
+    const idx = rfqs.findIndex(r=>r.id===mapped.id);
+    if(idx>-1) rfqs[idx] = mapped; else rfqs.push(mapped);
+    if(document.getElementById('rfqListBox')) renderRfqSection();
+  }
+  ['buyer_business_id','supplier_business_id'].forEach(col=>{
+    const ch = sb.channel('rfq-changes-'+col+'-'+myBusiness.id)
+      .on('postgres_changes', {event:'*', schema:'public', table:'rfqs', filter:`${col}=eq.${myBusiness.id}`}, onChange)
+      .subscribe();
+    rfqRealtimeChannels.push(ch);
+  });
+}
+
 /* ============ RFQ (Request for Quote) ============ */
 const rfqs = [
   {id:'rfq1', rfqNumber:'RFQ-2026-041', buyerId:ME_BUYER, buyerName:'Dela Cruz Hardware', supplierId:'northline', supplierName:'Northline Welding Materials',
@@ -12291,7 +12405,7 @@ function renderRfqList(list, isSupplierRole){
     </div>`;
   }).join('') : `<div style="text-align:center;color:var(--ink);padding:20px;font-size:15.5px;">No RFQs yet.</div>`;
 }
-function sendRfq(){
+async function sendRfq(){
   const supplierEl = document.getElementById('rfqSupplier');
   if(!supplierEl) return; // form isn't open — nothing to submit
   const supplierId = supplierEl.value;
@@ -12303,10 +12417,20 @@ function sendRfq(){
   if(!product){ showToast('Please enter a product name.'); return; }
   if(!qty || qty<=0){ showToast('Please enter a quantity greater than zero.'); return; }
   if(!neededBy){ showToast('Please select a needed-by date.'); return; }
-  rfqIdCounter++;
-  rfqs.push({id:'rfq'+rfqIdCounter, rfqNumber:'RFQ-2026-0'+rfqIdCounter, buyerId:ME_BUYER, buyerName:'Dela Cruz Hardware', supplierId, supplierName:supplier.name,
-    items:[{product, qty}], neededByDate:neededBy, notes, status:'sent', quote:null,
-    history:[{date:'2026-08-26', time:'10:15 AM', actor:'buyer', action:'RFQ sent'}]});
+  if(myBusiness){
+    const { data, error } = await sb.from('rfqs').insert({
+      buyer_business_id: myBusiness.id, supplier_business_id: supplierId,
+      items:[{product, qty}], needed_by_date: neededBy, notes, status:'sent',
+      history:[{date: new Date().toISOString().slice(0,10), time:'Just now', actor:'buyer', action:'RFQ sent'}],
+    }).select().single();
+    if(error){ showToast("Couldn't send that RFQ — try again.", 'error'); return; }
+    rfqs.push(await mapRfqRowToJs(data));
+  } else {
+    rfqIdCounter++;
+    rfqs.push({id:'rfq'+rfqIdCounter, rfqNumber:'RFQ-2026-0'+rfqIdCounter, buyerId:ME_BUYER, buyerName:'Dela Cruz Hardware', supplierId, supplierName:supplier.name,
+      items:[{product, qty}], neededByDate:neededBy, notes, status:'sent', quote:null,
+      history:[{date:'2026-08-26', time:'10:15 AM', actor:'buyer', action:'RFQ sent'}]});
+  }
   document.getElementById('rfqProduct').value=''; document.getElementById('rfqQty').value=1; document.getElementById('rfqNeededBy').value=''; document.getElementById('rfqNotes').value='';
   renderRfqSection();
 }
@@ -12323,7 +12447,7 @@ function openQuoteForm(id){
     <button class="btn btn-primary" onclick="submitQuote('${id}')">Send quote →</button>
   </div>`;
 }
-function submitQuote(id){
+async function submitQuote(id){
   const rfq = rfqs.find(r=>r.id===id);
   const price = Number(document.getElementById('quotePrice_'+id).value);
   const lead = Number(document.getElementById('quoteLead_'+id).value);
@@ -12331,36 +12455,60 @@ function submitQuote(id){
   const note = document.getElementById('quoteNote_'+id).value;
   if(!price || price<=0){ showToast('Please enter a price greater than zero.'); return; }
   if(!valid){ showToast('Please select a validity date for this quote.'); return; }
-  rfq.quote = {unitPrice:price, leadTimeDays:lead, validUntil:valid, note};
+  const quote = {unitPrice:price, leadTimeDays:lead, validUntil:valid, note};
+  const historyEntry = myBusiness
+    ? {date: new Date().toISOString().slice(0,10), time:'Just now', actor:'supplier', action:'Quote submitted'}
+    : {date:'2026-08-26', time:'11:00 AM', actor:'supplier', action:'Quote submitted'};
+  const newHistory = [...rfq.history, historyEntry];
+  if(myBusiness){
+    const { error } = await sb.from('rfqs').update({ quote, status:'quoted', history:newHistory }).eq('id', id);
+    if(error){ showToast("Couldn't submit that quote — try again.", 'error'); return; }
+  }
+  rfq.quote = quote;
   rfq.status = 'quoted';
-  rfq.history.push({date:'2026-08-26', time:'11:00 AM', actor:'supplier', action:'Quote submitted'});
+  rfq.history = newHistory;
   renderRfqSection();
   if(rfq.buyerId===ME_BUYER) pushBuyerInboxItem({title:'Quote received — '+rfq.rfqNumber, meta:rfq.supplierName+' quoted '+fmtPHP(price)+'/unit', pillLabel:'Quote', pillClass:'pill-info', poId:null});
 }
-function acceptRfqQuote(id){
+async function acceptRfqQuote(id){
   const rfq = rfqs.find(r=>r.id===id);
+  const today = myBusiness ? new Date().toISOString().slice(0,10) : '2026-08-26';
+  const historyEntry = {date: today, time: myBusiness ? 'Just now' : '11:30 AM', actor:'buyer', action:'Quote accepted'};
+  const newHistory = [...rfq.history, historyEntry];
+  if(myBusiness){
+    const { error } = await sb.from('rfqs').update({ status:'accepted', history:newHistory }).eq('id', id);
+    if(error){ showToast("Couldn't accept that quote — try again.", 'error'); return; }
+  }
   rfq.status = 'accepted';
-  rfq.history.push({date:'2026-08-26', time:'11:30 AM', actor:'buyer', action:'Quote accepted'});
+  rfq.history = newHistory;
   const supplier = suppliersData.find(s=>s.id===rfq.supplierId);
-  poIdCounter++;
+  const poNumber = issuePoNumber();
   const newPO = {
-    id:newPoId(), poNumber:'PO-2026-0'+(880+poIdCounter),
-    buyerId:ME_BUYER, buyerName: myBusiness ? myBusiness.name : 'Dela Cruz Hardware', supplierId:rfq.supplierId, supplierName:supplier.name,
+    id:newPoId(), poNumber,
+    buyerId: myBusiness ? myBusiness.id : ME_BUYER, buyerName: myBusiness ? myBusiness.name : 'Dela Cruz Hardware', supplierId:rfq.supplierId, supplierName:supplier.name,
     type:'local', status:'draft', currency:'PHP', taxRate:0.12,
     lineItems:rfq.items.map(i=>({product:i.product, qty:i.qty, unitPrice:rfq.quote.unitPrice})),
-    createdDate:'2026-08-26', requestedDeliveryDate:rfq.neededByDate, deliveryAddress:'Dela Cruz Hardware, Marikina City', notes:'Created from accepted quote '+rfq.rfqNumber,
+    createdDate: today, requestedDeliveryDate:rfq.neededByDate, deliveryAddress: myBusiness ? (savedBuyerAddresses[0]||'') : 'Dela Cruz Hardware, Marikina City', notes:'Created from accepted quote '+rfq.rfqNumber,
     shipping:null, customs:null, invoice:null, counter:null, deliveryConfirmation:null, atRisk:false, riskNote:'',
-    history:[{date:'2026-08-26', actor:'buyer', action:'Draft created from accepted RFQ '+rfq.rfqNumber}],
+    history:[{date: today, actor:'buyer', action:'Draft created from accepted RFQ '+rfq.rfqNumber}],
   };
   purchaseOrders.push(newPO);
   renderRfqSection();
   if(document.getElementById('orderRows')) renderOrdersTable();
   showToast('Quote accepted — a draft Purchase Order has been created from it. You can review and send it from Orders & Freight.', 'success');
 }
-function declineRfqQuote(id){
+async function declineRfqQuote(id){
   const rfq = rfqs.find(r=>r.id===id);
+  const historyEntry = myBusiness
+    ? {date: new Date().toISOString().slice(0,10), time:'Just now', actor:'buyer', action:'Quote declined'}
+    : {date:'2026-08-26', time:'1:15 PM', actor:'buyer', action:'Quote declined'};
+  const newHistory = [...rfq.history, historyEntry];
+  if(myBusiness){
+    const { error } = await sb.from('rfqs').update({ status:'declined', history:newHistory }).eq('id', id);
+    if(error){ showToast("Couldn't decline that quote — try again.", 'error'); return; }
+  }
   rfq.status = 'declined';
-  rfq.history.push({date:'2026-08-26', time:'1:15 PM', actor:'buyer', action:'Quote declined'});
+  rfq.history = newHistory;
   renderRfqSection();
 }
 
@@ -12428,8 +12576,13 @@ function findSimilarExistingAccount(name){
 // confirmation immediately (auto-send, not just copy/paste).
 function sendInvite(){
   if(!requireSupplierCapacity(1)) return;
-  const name = document.getElementById('supName').value;
+  const name = document.getElementById('supName').value.trim();
+  if(!name){ showToast('Please enter the supplier/business name.'); return; }
   if(!selectedChannels.length){ showToast('Please pick at least one channel to send via (Viber, WhatsApp, or Email).'); return; }
+  if(myBusiness){
+    const email = (document.getElementById('supEmail')?.value || '').trim();
+    if(!email){ showToast('Please enter their email address so they can be connected once they join.'); return; }
+  }
   const match = findSimilarExistingAccount(name);
   // Was a native confirm() dialog — same reliability issue as elsewhere in this file: a blocked
   // or auto-dismissed confirm() returns false and silently drops the whole send, with nothing on
@@ -18935,8 +19088,11 @@ async function bootNifti(){
     await loadRealPurchaseOrders();
     subscribeToPurchaseOrders();
     await loadMyConnections();
+    subscribeToBusinessRelationships();
     await loadMyConversations();
     subscribeToConversations();
+    await loadMyRfqs();
+    subscribeToRfqs();
     applyRealAccountUI();
     navigate('dashboard');
   }
