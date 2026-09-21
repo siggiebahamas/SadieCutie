@@ -3276,12 +3276,37 @@ function mapPoJsToRow(po){
 // fail the foreign key and is silently skipped, logged to console, never surfaced as a broken
 // UI: the local optimistic update (what the user actually sees) already happened before this
 // runs, exactly as it did before Supabase existed.
+// Mirrors sendRealMessage's markFailed/markDelivered split (see there for the full reasoning).
+// The upsert below writes this PO's ENTIRE current state — including every history entry — in
+// one shot, so a successful sync means the whole order is now on the server, and a failed one
+// leaves the whole order (not just whatever change triggered this call) still owed to Supabase.
+function markPoSyncFailed(po){
+  po._pendingSync = true;
+  const last = po.history[po.history.length-1];
+  if(last) last._pendingSync = true;
+  if(document.getElementById('orderRows')) renderOrdersTable();
+  if(document.getElementById('supplierOrderRows')) renderSupplierOrdersTable();
+}
+function markPoSyncDelivered(po){
+  if(!po._pendingSync && !(po.history||[]).some(h=>h._pendingSync)) return; // nothing to clear — skip the re-render
+  po._pendingSync = false;
+  (po.history||[]).forEach(h=>{ h._pendingSync = false; });
+  if(document.getElementById('orderRows')) renderOrdersTable();
+  if(document.getElementById('supplierOrderRows')) renderSupplierOrdersTable();
+}
 async function syncPoToSupabase(po){
   if(!myBusiness) return; // demo/unauthenticated session — nothing to sync
   try{
     const { error } = await sb.from('purchase_orders').upsert(mapPoJsToRow(po));
-    if(error) console.warn('PO sync skipped for', po.poNumber, '—', error.message);
-  }catch(e){ console.warn('PO sync failed for', po.poNumber, e); }
+    if(error){ console.warn('PO sync skipped for', po.poNumber, '—', error.message); markPoSyncFailed(po); return; }
+    markPoSyncDelivered(po);
+  }catch(e){ console.warn('PO sync failed for', po.poNumber, e); markPoSyncFailed(po); }
+}
+// Viber-style reconnect handling for orders, same idea as retryPendingMessages: actually re-syncs
+// every order still flagged pending instead of just clearing the flag with nothing behind it.
+async function retryPendingPOs(){
+  if(!myBusiness || isOffline) return;
+  for(const po of purchaseOrders.filter(p=>p._pendingSync)) await syncPoToSupabase(po);
 }
 
 async function loadRealPurchaseOrders(){
@@ -3290,9 +3315,21 @@ async function loadRealPurchaseOrders(){
     .select('*')
     .or(`buyer_business_id.eq.${myBusiness.id},supplier_business_id.eq.${myBusiness.id}`);
   if(error){ console.warn('Could not load purchase orders:', error.message); return; }
+  // Snapshot any order still waiting to actually reach the server (a failed sync, or one that
+  // never got its first chance while offline) before the wholesale rebuild below replaces this
+  // array. The local copy is AHEAD of whatever this fetch returns by definition of being pending,
+  // so it must win over the DB's version for that id, and must survive even if the DB has no row
+  // for it at all yet (a brand-new draft that never made its first sync). Without this, reopening
+  // the app — or even this function's own periodic re-subscribe — would silently and permanently
+  // drop a real, unsent order edit: the purchase-order equivalent of the chat-message bug fixed
+  // alongside this (see loadMyConversations).
+  const pendingById = new Map(purchaseOrders.filter(p=>p._pendingSync).map(p=>[p.id, p]));
   const mapped = await Promise.all((data||[]).map(mapPoRowToJs));
+  const byId = new Map(mapped.map(p=>[p.id, p]));
+  pendingById.forEach((po, id) => byId.set(id, po)); // local pending version always wins, whether or not the DB already had a row for this id
+  const merged = [...byId.values()];
   purchaseOrders.length = 0;
-  purchaseOrders.push(...mapped);
+  purchaseOrders.push(...merged);
 }
 
 // Two subscriptions, not one — Realtime filters can't express "buyer OR supplier" across two
@@ -3705,12 +3742,14 @@ window.addEventListener('online', () => {
   updateOfflineBanner();
   const row = document.getElementById('offlineDraftExportRow');
   if(row) row.classList.add('hidden');
-  purchaseOrders.forEach(po => { po._pendingSync = false; (po.history||[]).forEach(h=>{ h._pendingSync = false; }); });
-  // Real accounts get an actual retry of every unsent message (see retryPendingMessages) instead
-  // of having the pending flag cleared with nothing behind it; the demo has no server to retry
-  // against, so its messages just drop the flag as before.
-  if(myBusiness) retryPendingMessages();
-  else getConversations().forEach(c => (c.messages||[]).forEach(m => { m._pendingSync = false; }));
+  // Real accounts get an actual retry of every unsent order/message (see retryPendingPOs/
+  // retryPendingMessages) instead of having the pending flag cleared with nothing behind it; the
+  // demo has no server to retry against, so its data just drops the flag as before.
+  if(myBusiness){ retryPendingPOs(); retryPendingMessages(); }
+  else{
+    purchaseOrders.forEach(po => { po._pendingSync = false; (po.history||[]).forEach(h=>{ h._pendingSync = false; }); });
+    getConversations().forEach(c => (c.messages||[]).forEach(m => { m._pendingSync = false; }));
+  }
   if(document.getElementById('orderRows')) renderOrdersTable();
   if(document.getElementById('supplierOrderRows')) renderSupplierOrdersTable();
   if(activeConvId){ const conv = getConversations().find(c=>c.id===activeConvId); if(conv) renderThread(conv); }
@@ -10645,7 +10684,7 @@ function renderPaymentPanel(id){
   return `<div class="spine-inline-action" style="margin-top:8px;">
     <button class="btn btn-outline" style="margin-bottom:10px;" onclick="event.stopPropagation(); openPayNowPanel('${id}')">💳 Show Payment QR Codes</button>
     <div id="payNowPanel_${id}"></div>
-    ${myBusiness ? `<div style="margin-bottom:14px;padding:12px;border:1.5px solid var(--green);border-radius:10px;">
+    ${(myBusiness && myBusiness.id === po.buyerId) ? `<div style="margin-bottom:14px;padding:12px;border:1.5px solid var(--green);border-radius:10px;">
       <div style="font-weight:700;margin-bottom:6px;">Pay with GCash or Maya — real payment (sandbox/test mode)</div>
       <div style="font-size:14px;color:var(--ink);opacity:.8;margin-bottom:8px;">Opens an actual PayMongo checkout. The invoice only marks itself paid once PayMongo confirms the payment went through — not on your say-so.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -10679,6 +10718,34 @@ function renderPaymentPanel(id){
     <input type="file" id="paidProof_${id}" accept="image/*" style="margin-bottom:10px;">
     <button class="btn btn-primary" onclick="event.stopPropagation(); submitRecordPayment('${id}')">Record payment →</button>
   </div>`;
+}
+// Lands a buyer back from a PayMongo checkout redirect somewhere that actually tells them
+// something, instead of the hash silently doing nothing (confirmed via a earlier grep: nothing in
+// this file ever read #payment-result before now). create-gcash-payment/create-maya-payment both
+// set their PayMongo redirect/return_url to `${origin}/#payment-result?po=<id>&status=<...>`.
+// Deliberately does NOT claim the payment is confirmed paid here — completing the GCash/Maya
+// approval step only means PayMongo is now processing it; the webhook (paymongo-webhook, verified
+// against PayMongo's own signature) is the only thing that actually marks the invoice paid, and
+// the realtime subscription already running (subscribeToPurchaseOrders) will reflect that the
+// moment it lands, without needing this handler to poll for it.
+function handlePaymentResultHash(){
+  const hash = location.hash;
+  if(!hash.startsWith('#payment-result')) return;
+  const queryStart = hash.indexOf('?');
+  const params = new URLSearchParams(queryStart > -1 ? hash.slice(queryStart+1) : '');
+  const poId = params.get('po');
+  const status = params.get('status');
+  // Strip the hash right away so a later reload or back-navigation on this same tab doesn't
+  // re-show this toast for a page that isn't actually returning from checkout anymore.
+  history.replaceState(null, '', location.pathname + location.search);
+  navigate('orders');
+  if(status === 'failed'){
+    showToast("Payment wasn't completed — you can try again from this order's Payments tab.", 'error');
+  } else {
+    showToast("Payment submitted — this order will update automatically once PayMongo confirms it.", 'success');
+  }
+  const po = poId ? getPO(poId) : null;
+  if(po) openOrderDetailModal(po.id, false); // whoever completes a checkout here is definitionally the buyer (create-gcash-payment/create-maya-payment both reject anyone else)
 }
 async function startGcashPayment(id, btn){
   // Guards against a double-click firing two payment intents for the same invoice before the
@@ -19777,6 +19844,7 @@ async function bootNifti(){
   if(signedIn){
     await loadRealPurchaseOrders();
     subscribeToPurchaseOrders();
+    retryPendingPOs(); // picks up anything still unsynced from before this reload (see loadRealPurchaseOrders) if we're already back online
     await loadMyConnections();
     subscribeToBusinessRelationships();
     await loadMyConversations();
@@ -19787,6 +19855,7 @@ async function bootNifti(){
     subscribeToTeamAndRoles();
     applyRealAccountUI();
     navigate('dashboard');
+    handlePaymentResultHash(); // after navigate('dashboard') so a #payment-result redirect's own navigate('orders') is the one that actually sticks
   }
 }
 bootNifti();
