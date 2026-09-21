@@ -3162,6 +3162,45 @@ async function loadMyCustomRoles(){
   if(error || !data) return;
   customRoles = data.map(r => ({ name:r.name, allowedPages:r.allowed_pages, rowId:r.id }));
 }
+// Without this, a teammate demoted or removed by the Owner in another tab/device kept acting
+// with their OLD permissions until they happened to reload — getCurrentUserRoles() reads from
+// myTeamMember, cached once at sign-in, not the live roster array that loadMyTeamRoster()
+// refreshes elsewhere.
+let teamRealtimeChannels = [];
+function subscribeToTeamAndRoles(){
+  if(!myBusiness) return;
+  teamRealtimeChannels.forEach(ch => sb.removeChannel(ch));
+  teamRealtimeChannels = [];
+  const onTeamChange = async (payload) => {
+    if(payload.eventType === 'DELETE' && payload.old && payload.old.id === currentUserId){
+      showToast('You were removed from this business. Signing out.', 'error');
+      await sb.auth.signOut();
+      window.location.reload();
+      return;
+    }
+    await loadMyTeamRoster();
+    if(payload.new && payload.new.id === currentUserId && myTeamMember){
+      myTeamMember.roles = payload.new.roles;
+      myTeamMember.status = payload.new.status;
+      previewRole = null;
+      renderSidebarForViewAsRole();
+    }
+    if(document.getElementById('teamMembersList')) renderTeamMembersList();
+  };
+  const onCustomRoleChange = async () => {
+    await loadMyCustomRoles();
+    if(document.getElementById('customRolesList')) renderCustomRolesList();
+    renderSidebarForViewAsRole();
+  };
+  teamRealtimeChannels.push(
+    sb.channel('team-changes-'+myBusiness.id)
+      .on('postgres_changes', {event:'*', schema:'public', table:'team_members', filter:`business_id=eq.${myBusiness.id}`}, onTeamChange)
+      .subscribe(),
+    sb.channel('custom-role-changes-'+myBusiness.id)
+      .on('postgres_changes', {event:'*', schema:'public', table:'custom_roles', filter:`business_id=eq.${myBusiness.id}`}, onCustomRoleChange)
+      .subscribe(),
+  );
+}
 
 /* ============ PURCHASE ORDER SYNC (Phase 4, batch 1) ============
    purchaseOrders itself stays the single source every render function already reads from —
@@ -3995,6 +4034,8 @@ async function logOut(){
   rfqRealtimeChannels = [];
   businessRelationshipsChannels.forEach(ch => sb.removeChannel(ch));
   businessRelationshipsChannels = [];
+  teamRealtimeChannels.forEach(ch => sb.removeChannel(ch));
+  teamRealtimeChannels = [];
   // A full reload, not just navigate('index') — this business's data (custom roles, tax
   // profile, notification settings, price agreements, and everything else this session loaded
   // into memory under its scoped storage key) needs to actually leave memory, not just have its
@@ -6233,6 +6274,7 @@ function getActiveConv(){ return getConversations().find(c=>c.id===activeConvId)
 function selectConversation(id){
   activeConvId = id;
   const conv = getConversations().find(c=>c.id===id);
+  if(!conv){ showToast("Couldn't open that conversation."); return; }
   conv.unread = 0;
   if(myBusiness) markConversationReadRemote(conv);
   const body = document.getElementById('threadBody');
@@ -6456,8 +6498,13 @@ function submitAnnouncement(){
   recipientIds.forEach(id=>{
     const conv = supplierConversations.find(c=>c.id===id);
     if(!conv) return;
-    conv.messages.push({from:'me', text, time:'Just now', date:dateStr, isAnnouncement:true});
+    // Matches sendMessage()'s real-account handling — without this, a real supplier's
+    // announcement never reached Supabase and no buyer ever actually received it, even though
+    // the UI confirmed "Sent to N buyers."
+    const newMsg = {id: newMessageId(), from:'me', text, time:'Just now', date:dateStr, isAnnouncement:true};
+    conv.messages.push(newMsg);
     capConversationMessages(conv);
+    if(myBusiness) sendRealMessage(conv, newMsg);
     // If the recipient happens to be the live buyer persona in this same session, it shows up
     // as a real inbox notification too — not just buried in a message thread.
     if(id === ME_BUYER){
@@ -8285,6 +8332,7 @@ function openAddTeamMemberForm(){
   </div>`;
 }
 async function saveTeamMember(){
+  if(!requirePermission('manageTeam')) return;
   const nameEl = document.getElementById('tmName');
   if(!nameEl) return; // form isn't open — nothing to submit
   const name = nameEl.value.trim();
@@ -18039,6 +18087,12 @@ function createConversationForNewConnection(id, name, intoRole){
 function acceptDiscoveryLead(id){
   const lead = NiftiDB.discoveryLeads.find(l=>l.id===id);
   if(!lead || lead.status!=='new') return;
+  // Discover's whole prospect pool (buyerProfiles/supplierProfiles) is fixed demo data — there's
+  // no real "who else on Nifti opted into Discover" backend yet. Accepting used to create a
+  // permanent-looking connection + conversation for a real account with no real counterpart
+  // behind it: messages sent through it silently never left this browser (sendRealMessage no-ops
+  // without a real conversationRowId), yet the UI called it "a real connection."
+  if(myBusiness){ showToast("Discover connections aren't available yet for live accounts — invite this business directly from My Suppliers/My Buyers instead.", 'error'); return; }
   lead.status = 'accepted';
   const newId = 'disc_'+Date.now();
   lead.acceptedId = newId;
@@ -18095,6 +18149,10 @@ function sendDiscoveryRequest(idx, mode){
 }
 function acceptOutboundDiscovery(idx, mode){
   const p = window._discListRef[idx];
+  // Same reasoning as acceptDiscoveryLead — this whole flow browses a fixed demo prospect pool,
+  // not real Nifti businesses, so "accepting" here has never had a real counterpart for a real
+  // account to actually connect to.
+  if(myBusiness){ showToast("Discover connections aren't available yet for live accounts — invite this business directly from My Suppliers/My Buyers instead.", 'error'); return; }
   const newId = 'disc_'+Date.now();
   const record = {id:newId, name:p.n, category:p.cat, orders:0, lastOrder:'Never', since:APP_TODAY, preferredContact:'In-app chat', paymentTerms:'Not yet set'};
   if(mode==='suppliers') suppliersData.push(record); else buyersData.push(record);
@@ -19616,6 +19674,7 @@ async function bootNifti(){
     subscribeToConversations();
     await loadMyRfqs();
     subscribeToRfqs();
+    subscribeToTeamAndRoles();
     applyRealAccountUI();
     navigate('dashboard');
   }
