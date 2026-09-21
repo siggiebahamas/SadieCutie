@@ -3146,6 +3146,13 @@ async function loadMyBusinessContext(){
   // listings, which then also leaks into the price-agreement product picker (see
   // syncMyCatalogToBuyerReference, called unconditionally later in boot).
   myCatalog = [];
+  // Same problem again: savedBuyerAddresses ships seeded with the demo buyer's literal address
+  // ('Dela Cruz Hardware, Marikina City'). Businesses has no address column to load a real one
+  // from (same gap noted above for taxProfiles.registeredAddress), so a real buyer's very first
+  // auto-created PO (from an accepted RFQ quote, or an auto-drafted reorder) would otherwise
+  // silently ship with this fake demo address until they happened to type a real one manually via
+  // the Create PO form. Cleared here so it falls back to an honest blank instead.
+  savedBuyerAddresses = [];
   await loadMyTeamRoster();
   await loadMyCustomRoles();
   return true;
@@ -3439,6 +3446,14 @@ async function loadMyConnections(){
     const name = (await getBusinessName(counterpartId)) || 'Unknown business';
     const related = myPOs.filter(o => isSupplierRole ? o.buyerId===counterpartId : o.supplierId===counterpartId);
     const mostRecent = related.slice().sort((a,b)=>(b.createdDate||'').localeCompare(a.createdDate||''))[0];
+    // termsOfTrade is a separate global map (keyed by relationshipKey), not a field on this
+    // object, since renderTermsOfTrade/sendTermsProposal/agreeToTerms already read/write it that
+    // way (same pattern predates real-account support) — populated here from the real row so both
+    // sides of a genuine propose-and-agree negotiation actually reach each other, instead of the
+    // previous in-memory-only object that silently dropped every proposal on the next reload and
+    // never transmitted anything to the counterparty in the first place.
+    const key = relationshipKey(counterpartId, isSupplierRole);
+    if(r.terms_of_trade) termsOfTrade[key] = r.terms_of_trade; else delete termsOfTrade[key];
     return {
       id: counterpartId, name, category: r.category || '',
       orders: related.length,
@@ -4020,6 +4035,18 @@ function addPartner(){
 }
 function deactivateAccount(){
   if(!requirePermission('manageAccount')) return;
+  // For a real account this used to just disable the button and say "Account deactivated" with
+  // zero actual effect — no sign-out, no change to businesses/team_members, nothing. The account
+  // stayed fully live (still authenticated, still reachable for new orders/messages) while telling
+  // the Owner it had been shut down. Real deactivation (blocking sign-in for the whole team,
+  // hiding the business from counterparties, an actual reactivation path matching "you can
+  // reactivate anytime") is real account-lifecycle work this app doesn't have the schema/flow for
+  // yet — showing an honest "not available yet" beats a false confirmation on something this
+  // consequential and hard to reverse if it silently did the wrong thing.
+  if(myBusiness){
+    showToast("Account deactivation isn't available yet — contact support if you need your account deactivated.", 'error');
+    return;
+  }
   if(confirm('Deactivate your account? You can reactivate anytime.')){
     const btn = document.getElementById('deactivateBtn');
     btn.textContent = 'Account deactivated';
@@ -4488,7 +4515,10 @@ function resolveSupplierInboxItem(id, resolvedText){
   renderSupplierInbox();
 }
 function updateSupplierBadge(){
-  const count = supplierInbox.filter(i=>!i.resolved).length;
+  // Matches renderSupplierInbox's own visibility filter — without this, an item targeted at one
+  // specific teammate (forMemberId) still inflated every OTHER teammate's badge count, even though
+  // it never actually appears in their own inbox list.
+  const count = supplierInbox.filter(i=>!i.resolved && (!i.forMemberId || i.forMemberId===currentUserId)).length;
   const sidebarBadge = document.getElementById('supplierRoleBadge');
   if(sidebarBadge){ sidebarBadge.style.display = count>0 ? 'inline-flex' : 'none'; sidebarBadge.textContent = count; }
   const statNum = document.getElementById('supplierNewRequestsStat');
@@ -7174,6 +7204,7 @@ async function syncBusinessRelationshipField(buyerId, supplierId, field, value){
   return true;
 }
 async function savePaymentTerms(partyId){
+  if(!requirePermission('proposeTerms')) return;
   const isSupplierRole = currentAppRole === 'supplier';
   const dataset = isSupplierRole ? buyersData : suppliersData;
   const party = dataset.find(p=>p.id===partyId);
@@ -7241,6 +7272,7 @@ function editCreditLimit(partyId){
   </div>`;
 }
 async function saveCreditLimit(partyId){
+  if(!requirePermission('markInvoicePaid')) return; // no dedicated permission key for this yet — finance-adjacent risk control, reuses the closest existing one (same convention as submitSalesInvoice)
   const party = buyersData.find(p=>p.id===partyId);
   const raw = document.getElementById('creditLimitInput_'+partyId).value.trim();
   const val = raw ? Number(raw) : null;
@@ -7319,6 +7351,11 @@ function openEditTermsForm(partyId){
     <button class="btn btn-primary" style="padding:8px 14px;font-size:15px;" onclick="event.stopPropagation(); sendTermsProposal('${partyId}')">Send to ${otherLabel} →</button>
   </div>`;
 }
+// Both write through to business_relationships.terms_of_trade (via the same
+// syncBusinessRelationshipField used by credit limits/payment terms) so a real proposal/agreement
+// actually reaches the counterparty and survives a reload on both sides — previously this was a
+// bare in-memory object with no Supabase backing at all, despite the UI's own text ("Sent —
+// awaiting the supplier's acknowledgment") claiming something had actually been transmitted.
 function sendTermsProposal(partyId){
   if(!requirePermission('proposeTerms')) return;
   const text = document.getElementById('termsInput_'+partyId).value.trim();
@@ -7328,6 +7365,13 @@ function sendTermsProposal(partyId){
   termsOfTrade[key] = {text, status:'pending', proposedBy: isSupplierRole ? 'supplier' : 'buyer'};
   document.getElementById('termsForm_'+partyId).innerHTML = '';
   renderSuppliersTable();
+  if(myBusiness){
+    const buyerId = isSupplierRole ? partyId : myBusiness.id;
+    const supplierId = isSupplierRole ? myBusiness.id : partyId;
+    syncBusinessRelationshipField(buyerId, supplierId, 'terms_of_trade', termsOfTrade[key]).then(ok=>{
+      if(!ok) showToast("Couldn't send these terms — try again.", 'error');
+    });
+  }
 }
 function agreeToTerms(partyId){
   const isSupplierRole = currentAppRole === 'supplier';
@@ -7337,6 +7381,13 @@ function agreeToTerms(partyId){
   t.status = 'agreed';
   t.agreedDate = APP_TODAY;
   renderSuppliersTable();
+  if(myBusiness){
+    const buyerId = isSupplierRole ? partyId : myBusiness.id;
+    const supplierId = isSupplierRole ? myBusiness.id : partyId;
+    syncBusinessRelationshipField(buyerId, supplierId, 'terms_of_trade', t).then(ok=>{
+      if(!ok) showToast("Couldn't confirm — try again.", 'error');
+    });
+  }
 }
 // This data still feeds Create PO's autocomplete and the Compare Suppliers panel — it's just no
 // longer displayed as its own section in "My Suppliers," since a buyer doesn't need a reference
@@ -8597,6 +8648,11 @@ function pushBuyerInboxItem(entry){
   if(!entry.internal && !notificationSettings.orderUpdates) return null;
   const id = 'binbox'+(buyerInboxCounter++);
   buyerInbox.unshift(Object.assign({id, resolved:false, time:'Just now'}, entry));
+  // supplierInbox has always capped itself (see pushSupplierInboxItem); this one never did — was
+  // harmless while buyerInbox reset on every reload, but now that it's genuinely persisted (see
+  // collectNiftiPersistableState) and fed continuously by live cross-account notifications
+  // (notifyPoRealtimeChange/notifyRfqRealtimeChange), it can grow unbounded in the saved state.
+  if(buyerInbox.length > LOG_CAPS.buyerInbox) buyerInbox.length = LOG_CAPS.buyerInbox;
   const el = document.getElementById('buyerInboxList');
   if(el) renderBuyerInbox();
   return id;
@@ -8609,9 +8665,17 @@ function renderBuyerInbox(){
   // untargeted stays visible to everyone, same as before.
   const open = buyerInbox.filter(i=>!i.resolved && (!i.forMemberId || i.forMemberId===currentUserId));
   el.innerHTML = open.length ? open.map((item,idx)=>{
+    // item.isRfq exists because a null poId used to mean only one thing here ("a team-related
+    // item, go to Team & Roles") — RFQ notifications also have no poId (they're not a PO yet) but
+    // sending someone to Team & Roles for a quote update is a different page entirely. This split
+    // out once RFQ notifications started actually reaching a real counterparty live (see
+    // notifyRfqRealtimeChange) — before that, submitQuote's own identical poId:null push never
+    // manifested for a real cross-account user, so the wrong destination went unnoticed.
     const action = item.poId
       ? `<div class="row-right" style="cursor:pointer;color:var(--green);font-weight:700;" onclick="navigate('orders'); toggleOrderRow('${item.poId}');">View PO →</div>`
-      : `<div class="row-right" style="cursor:pointer;color:var(--green);font-weight:700;" onclick="navigate('team');">View →</div>`;
+      : item.isRfq
+        ? `<div class="row-right" style="cursor:pointer;color:var(--green);font-weight:700;" onclick="navigate('invite'); setInviteTab('rfq');">View RFQ →</div>`
+        : `<div class="row-right" style="cursor:pointer;color:var(--green);font-weight:700;" onclick="navigate('team');">View →</div>`;
     return `<div class="row-item"><div class="row-left"><span class="status-pill ${item.pillClass||'pill-info'}">${item.pillLabel||'Update'}</span><div><div class="row-name">${item.title}</div><div class="row-sub">${item.meta}</div></div></div>${action}</div>`;
   }).join('') : `<div style="text-align:center;color:var(--ink);padding:16px;font-size:15px;">No new updates from suppliers right now.</div>`;
   renderBuyerDashboardWidgets();
@@ -9629,6 +9693,7 @@ function submitRmaCreditNote(id){
   scheduleNiftiSave();
 }
 function submitRmaReplacement(id){
+  if(!requirePermission('markInvoicePaid')) return; // creates a real, no-charge fulfillment obligation — same financial-action gate as its sibling submitRmaCreditNote
   const po = getPO(id);
   const newId = newPoId();
   poIdCounter++;
@@ -10097,9 +10162,15 @@ function renderBackorderBanner(po){
 }
 function renderRelationshipNotes(partyId, partyName){
   const note = relationshipNotes[partyId] || '';
+  // "Shared with any teammate" overpromised — this is saved to local storage only (see
+  // collectNiftiPersistableState), which is per BROWSER, not per business account, so it doesn't
+  // actually sync to a teammate's own separate device/session yet. Worded honestly instead until
+  // that's genuinely built (would need its own table+RLS restricted to this business only, since
+  // it must NOT be visible to the counterparty the way business_relationships fields are).
+  const scopeNote = myBusiness ? 'Private to this device for now — not yet synced to your teammates\' own devices.' : `Shared with any teammate who has access to ${partyName} — not visible to them.`;
   return `<div style="margin-top:14px;">
     <div style="font-weight:800;font-size:15.5px;color:var(--ink);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px;">Relationship Notes</div>
-    <div style="font-size:15px;color:var(--ink);opacity:.8;margin-bottom:6px;">Shared with any teammate who has access to ${partyName} — not visible to them.</div>
+    <div style="font-size:15px;color:var(--ink);opacity:.8;margin-bottom:6px;">${scopeNote}</div>
     <textarea onclick="event.stopPropagation();" onchange="updateRelationshipNotes('${partyId}', this.value)" rows="3" placeholder="e.g. preferred delivery window, contact preferences, past issues to remember…" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:9px;font-family:var(--font-b);font-size:15.5px;box-sizing:border-box;">${note}</textarea>
   </div>`;
 }
@@ -11593,7 +11664,7 @@ function submitPartialConfirm(id){
   purchaseOrders.push(backorderPO);
   syncPoToSupabase(backorderPO); // brand-new order — poLogHistory above only synced `po` itself
 
-  pushBuyerInboxItem({title:'Partially confirmed — '+po.poNumber, meta:shortfall.map(s=>s.product+': '+s.qty+' short, backordered as '+backorderNumber).join(' · '), pillLabel:'Partial', pillClass:'pill-lowstock', poId:po.id});
+  if(po.buyerId===ME_BUYER) pushBuyerInboxItem({title:'Partially confirmed — '+po.poNumber, meta:shortfall.map(s=>s.product+': '+s.qty+' short, backordered as '+backorderNumber).join(' · '), pillLabel:'Partial', pillClass:'pill-lowstock', poId:po.id}); // matches every other supplier-side call site's guard (submitShip, issueInvoice, etc.) — was unconditional here
   const formEl2 = document.getElementById('partialConfirmForm_'+id);
   if(formEl2) formEl2.innerHTML = '';
   renderSupplierOrdersTable(); renderSupplierFulfillmentDashboard(true);
@@ -12790,7 +12861,7 @@ function notifyRfqRealtimeChange(rfq, isNewToMe){
   if(rfq.supplierId === myBusiness.id){
     pushSupplierInboxItem({title: (isNewToMe ? 'New RFQ — ' : rfq.rfqNumber+' — ')+(isNewToMe ? rfq.rfqNumber : last.action), meta: last.action, poId: null});
   } else if(rfq.buyerId === myBusiness.id){
-    pushBuyerInboxItem({title: rfq.rfqNumber+' — '+last.action, meta: last.action, pillLabel:'RFQ', pillClass:'pill-info', poId: null});
+    pushBuyerInboxItem({title: rfq.rfqNumber+' — '+last.action, meta: last.action, pillLabel:'RFQ', pillClass:'pill-info', poId: null, isRfq:true}); // isRfq routes the click to the RFQ tab, not Team & Roles — see renderBuyerInbox
   }
 }
 function subscribeToRfqs(){
@@ -12895,6 +12966,7 @@ function renderRfqList(list, isSupplierRole){
   }).join('') : `<div style="text-align:center;color:var(--ink);padding:20px;font-size:15.5px;">No RFQs yet.</div>`;
 }
 async function sendRfq(){
+  if(!requirePermission('sendOrder')) return; // same purchasing-commitment gate as sending an actual PO — an RFQ is the same kind of "I'm about to spend money on this" action
   const supplierEl = document.getElementById('rfqSupplier');
   if(!supplierEl) return; // form isn't open — nothing to submit
   const supplierId = supplierEl.value;
@@ -12957,9 +13029,10 @@ async function submitQuote(id){
   rfq.status = 'quoted';
   rfq.history = newHistory;
   renderRfqSection();
-  if(rfq.buyerId===ME_BUYER) pushBuyerInboxItem({title:'Quote received — '+rfq.rfqNumber, meta:rfq.supplierName+' quoted '+fmtPHP(price)+'/unit', pillLabel:'Quote', pillClass:'pill-info', poId:null});
+  if(rfq.buyerId===ME_BUYER) pushBuyerInboxItem({title:'Quote received — '+rfq.rfqNumber, meta:rfq.supplierName+' quoted '+fmtPHP(price)+'/unit', pillLabel:'Quote', pillClass:'pill-info', poId:null, isRfq:true});
 }
 async function acceptRfqQuote(id){
+  if(!requirePermission('sendOrder')) return; // accepting a quote creates a real draft PO — same gate as sendRfq/sending an actual PO
   const rfq = rfqs.find(r=>r.id===id);
   const today = APP_TODAY;
   const historyEntry = {date: today, time: myBusiness ? 'Just now' : '11:30 AM', actor:'buyer', action:'Quote accepted'};
@@ -13130,6 +13203,13 @@ const MOCK_CONTACTS = [
   {name:'Antipolo Lumber Yard', phone:'0917 880 1123'},
 ];
 function openBulkInviteModal(){
+  // MOCK_CONTACTS is entirely fictitious demo data (Iron Gate Fabrication, etc.) with no real
+  // backing — unlike the single-invite form (blanked of its demo values by applyRealAccountUI,
+  // and commitSendInvite genuinely writes to business_invites), this whole flow has no real path
+  // at all. A real account clicking through it would "invite" fake companies and see a permanent
+  // "✓ Invited" success message with nothing ever sent — same class of issue commitSendInvite was
+  // just fixed for, on the single-invite form right next to this one.
+  if(myBusiness){ showToast("Bulk invite from contacts isn't available yet for live accounts — use the invite form above to invite a real supplier by email.", 'error'); return; }
   document.getElementById('bulkContactsList').innerHTML = MOCK_CONTACTS.map((c,i)=>`
     <label style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--border);font-size:15.5px;">
       <input type="checkbox" id="bulkContact_${i}"> <span style="font-weight:700;">${c.name}</span> <span style="color:var(--ink);opacity:.65;">${c.phone}</span>
@@ -17130,7 +17210,8 @@ function computeBuyerDashboardStats(){
   const spend = pos.filter(o=>o.status!=='cancelled' && o.status!=='draft' && o.createdDate.startsWith(monthPrefix))
     .reduce((s,o)=>s+poTotal(o), 0);
   refreshInsights();
-  const needsAttention = NiftiDB.insights.filter(i=>isIssueRelevantToRole(i,'buyer')).length + buyerInbox.filter(i=>!i.resolved).length;
+  // Matches renderBuyerInbox's own visibility filter — see updateSupplierBadge for the same fix on the supplier side.
+  const needsAttention = NiftiDB.insights.filter(i=>isIssueRelevantToRole(i,'buyer')).length + buyerInbox.filter(i=>!i.resolved && (!i.forMemberId || i.forMemberId===currentUserId)).length;
   return {activeOrders: active.length, connectedSuppliers: suppliersData.length, spend, needsAttention};
 }
 function computeSupplierDashboardStats(){
@@ -17957,6 +18038,7 @@ function openConfirmPlanSwitch(planId){
   </div>`;
 }
 function confirmPlanSwitch(planId){
+  if(!requirePermission('manageAccount')) return; // billing/plan changes are an Owner-only concern, same as saveBusinessProfile/deactivateAccount — this had no check at all, letting e.g. a settings-scoped custom role or a General Manager switch plans or burn the one-time trial
   const plan = getPlanDef(planId);
   const sub = NiftiDB.subscription;
   const oldPlanId = sub.planId;
@@ -17995,6 +18077,7 @@ function openCancelSubscriptionForm(){
   </div>`;
 }
 function confirmCancelSubscription(){
+  if(!requirePermission('manageAccount')) return; // same reasoning as confirmPlanSwitch
   const sub = NiftiDB.subscription;
   const oldPlanId = sub.planId;
   sub.status = 'cancelled';
@@ -18152,7 +18235,7 @@ function capArray(arr, maxLen){
 // payload-size risk this was guarding against is heavy embedded attachments, which
 // stripHeavyAssetsForFallbackSave() already strips as a size fallback without deleting any
 // business record at all.
-const LOG_CAPS = {analyticsEvents:200, auditLog:300, pushLog:100, notificationsData:80, reminderLog:200, supplierInbox:150, discoveryLeads:100, deletedPriceAgreements:150, importBatches:80, conversationMessages:250};
+const LOG_CAPS = {analyticsEvents:200, auditLog:300, pushLog:100, notificationsData:80, reminderLog:200, supplierInbox:150, buyerInbox:150, discoveryLeads:100, deletedPriceAgreements:150, importBatches:80, conversationMessages:250};
 // Every conversation thread grows with normal use (sendMessage, the inline "message from an
 // insight" composer, and the demo's simulated replies all push onto conv.messages) and was the
 // one growing collection nothing here ever capped — every other log had a cap; this one didn't.
@@ -19670,7 +19753,8 @@ function collectNiftiPersistableState(){
     myBuyerProfilePublic,
     reminderLog: NiftiDB.reminderLog,
     dismissedInsightKeys: NiftiDB.dismissedInsightKeys,
-    poIdCounter, whIdCounter, supplierInboxCounter, buyerInboxCounter,
+    poIdCounter, whIdCounter, supplierInboxCounter, buyerInboxCounter, invoiceIdCounter, rfqIdCounter,
+    poTemplates, savedBuyerAddresses, termsOfTrade, relationshipNotes,
     currentAppRole, currentUserId, currentLanguage,
     whLabel, supplyLocationLabel,
     taxProfiles,
@@ -19727,6 +19811,10 @@ function applyNiftiPersistedState(s){
   whIdCounter = s.whIdCounter || whIdCounter;
   supplierInboxCounter = s.supplierInboxCounter || supplierInboxCounter;
   buyerInboxCounter = s.buyerInboxCounter || buyerInboxCounter;
+  invoiceIdCounter = s.invoiceIdCounter || invoiceIdCounter;
+  rfqIdCounter = s.rfqIdCounter || rfqIdCounter;
+  termsOfTrade = s.termsOfTrade || termsOfTrade;
+  relationshipNotes = s.relationshipNotes || relationshipNotes;
   currentAppRole = s.currentAppRole || currentAppRole;
   currentUserId = s.currentUserId || currentUserId;
   currentLanguage = s.currentLanguage || currentLanguage;
@@ -19738,6 +19826,8 @@ function applyNiftiPersistedState(s){
   if(s.supplierConversations){ supplierConversations.length = 0; supplierConversations.push(...s.supplierConversations); }
   if(s.purchaseOrders){ purchaseOrders.length = 0; purchaseOrders.push(...s.purchaseOrders); }
   if(s.rfqs){ rfqs.length = 0; rfqs.push(...s.rfqs); }
+  if(s.poTemplates){ poTemplates.length = 0; poTemplates.push(...s.poTemplates); }
+  if(s.savedBuyerAddresses){ savedBuyerAddresses.length = 0; savedBuyerAddresses.push(...s.savedBuyerAddresses); }
   if(s.dismissedIssueIds){ NIFTI_DISMISSED_ISSUE_IDS.length = 0; NIFTI_DISMISSED_ISSUE_IDS.push(...s.dismissedIssueIds); }
   if(s.auditLog){ NiftiDB.auditLog = s.auditLog; }
   if(s.importBatches){ NiftiDB.importBatches = s.importBatches; }
@@ -19764,6 +19854,7 @@ function applyNiftiPersistedState(s){
   if(NiftiDB.reminderLog.length > LOG_CAPS.reminderLog) NiftiDB.reminderLog.splice(0, NiftiDB.reminderLog.length - LOG_CAPS.reminderLog);
   if(deletedPriceAgreements.length > LOG_CAPS.deletedPriceAgreements) deletedPriceAgreements.splice(0, deletedPriceAgreements.length - LOG_CAPS.deletedPriceAgreements);
   if(NiftiDB.importBatches.length > LOG_CAPS.importBatches) NiftiDB.importBatches.splice(0, NiftiDB.importBatches.length - LOG_CAPS.importBatches);
+  if(buyerInbox.length > LOG_CAPS.buyerInbox) buyerInbox.length = LOG_CAPS.buyerInbox; // newest-first (unshift) — truncating the end keeps the newest, same as pushBuyerInboxItem's own cap
   // A blob saved before conversationMessages capping existed could have any number of threads
   // already oversized — trim every thread right away on load, same reasoning as the logs above.
   buyerConversations.forEach(capConversationMessages);
