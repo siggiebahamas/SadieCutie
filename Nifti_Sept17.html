@@ -2230,6 +2230,10 @@
         <div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;">
           <div><h1><span data-i18n="dash_greeting_buyer">Good morning, Dela Cruz Hardware</span></h1><p data-i18n="dash_sub">Here's what needs your attention today.</p></div>
         </div>
+        <div class="panel-card" style="margin-bottom:20px;">
+          <div class="panel-head"><h2>💬 Messages</h2><span class="lnk" onclick="navigate('messages')">Open Messages →</span></div>
+          <div id="buyerRecentMessagesBox"></div>
+        </div>
         <div id="buyerTodayPanel"></div>
         <div id="priceProtectionCard"></div>
         <div class="panel-card" style="margin-bottom:20px;">
@@ -3403,10 +3407,28 @@ async function loadMyConversations(){
   const col = myBusiness.type === 'buyer' ? 'buyer_business_id' : 'supplier_business_id';
   const { data: convRows, error } = await sb.from('conversations').select('*').eq(col, myBusiness.id);
   if(error || !convRows) { console.warn('Could not load conversations:', error && error.message); return; }
+  const target = myBusiness.type === 'buyer' ? buyerConversations : supplierConversations;
+  // Snapshot every message that hasn't actually reached the server yet (composed offline, or a
+  // send that failed while online) before the wholesale rebuild below replaces this array. Without
+  // this, a message that survived a reload via local-storage restore (see loadNiftiState, which
+  // runs before this) would vanish the instant this function re-fetches from the DB, since it only
+  // ever knows about rows that made it there — reopening the app (or even just its own periodic
+  // refresh) would silently and permanently drop anything still waiting to send, exactly the
+  // opposite of how Viber holds an unsent message until it's actually delivered.
+  const pendingByPartyId = new Map();
+  target.forEach(c => {
+    const pending = (c.messages||[]).filter(m => m._pendingSync);
+    if(pending.length) pendingByPartyId.set(c.id, pending);
+  });
   const mapped = await Promise.all(convRows.map(async (c) => {
     const counterpartId = myBusiness.type === 'buyer' ? c.supplier_business_id : c.buyer_business_id;
     const name = (await getBusinessName(counterpartId)) || 'Unknown business';
     const { data: msgRows } = await sb.from('conversation_messages').select('*').eq('conversation_id', c.id).order('sent_at');
+    const messages = (msgRows||[]).map(r=>mapMessageRowToJs(r, myBusiness.id));
+    // Carry over anything still pending for this counterpart that the DB fetch above doesn't have
+    // yet — filtered against what DID come back, since a pending message can have actually landed
+    // server-side in the meantime (e.g. a retry succeeded moments before this reload).
+    const stillPending = (pendingByPartyId.get(counterpartId) || []).filter(p => !messages.some(m=>m.id===p.id));
     return {
       // Every existing chat function (getConvRelatedPOs, messageSupplier, etc.) already treats
       // conv.id as the COUNTERPART'S business id, not an opaque conversation key — matches the
@@ -3418,10 +3440,9 @@ async function loadMyConversations(){
       name, category: '',
       initials: name.split(' ').map(w=>w[0]).filter(Boolean).slice(0,2).join('').toUpperCase() || '?',
       unread: myBusiness.type === 'buyer' ? c.buyer_unread_count : c.supplier_unread_count,
-      messages: (msgRows||[]).map(r=>mapMessageRowToJs(r, myBusiness.id)),
+      messages: [...messages, ...stillPending],
     };
   }));
-  const target = myBusiness.type === 'buyer' ? buyerConversations : supplierConversations;
   target.length = 0;
   target.push(...mapped);
 }
@@ -3432,19 +3453,54 @@ async function sendRealMessage(conv, localMsg){
     // Without this, a message that fails to reach the server while online (RLS denial, FK
     // violation, a dropped request) looked identical to one that actually sent — it kept the
     // "delivered" look right up until a reload silently dropped it, since loadMyConversations()
-    // rebuilds messages purely from what's actually in the database.
+    // rebuilds messages purely from what's actually in the database. Leaving it flagged pending
+    // (rather than just logging) is what makes retryPendingMessages() actually pick it back up.
     localMsg._pendingSync = true;
     if(activeConvId === conv.id) renderThread(conv);
+  };
+  const markDelivered = () => {
+    // Clears the pending tag the moment the server actually confirms the row exists, instead of
+    // waiting on the realtime echo (onMessageChange) to swap this object out — that echo can lag,
+    // or arrive before a just-reopened channel has finished resubscribing after a reconnect.
+    if(localMsg._pendingSync){ localMsg._pendingSync = false; if(activeConvId === conv.id) renderThread(conv); }
   };
   try{
     const { error } = await sb.from('conversation_messages').insert({
       id: localMsg.id, conversation_id: conv.conversationRowId, sender_business_id: myBusiness.id,
       text: localMsg.text, po_id: poRow ? poRow.id : null, attachment: localMsg.attachment || null,
     });
-    if(error){ console.warn('Message not saved to server:', error.message); markFailed(); return; }
+    if(error){
+      // 23505 = unique-violation on this message's own client-generated id — that only happens
+      // when a RETRY's insert lands on a row that's already there, meaning an earlier attempt
+      // actually succeeded (e.g. only the unread-count RPC below failed last time, not the insert
+      // itself). That's a delivered message, not a failed one — flagging it pending again here
+      // would leave it stuck retrying forever even though the server already has it.
+      if(error.code === '23505'){ markDelivered(); return; }
+      console.warn('Message not saved to server:', error.message); markFailed(); return;
+    }
+  }catch(e){ console.warn('Message send failed:', e); markFailed(); return; }
+  // The message itself is confirmed saved at this point — the unread-count bump below is a
+  // secondary nicety for the other side's badge, not part of "did this message actually send," so
+  // its own failure (logged, not thrown) never re-flags an already-delivered message as pending.
+  markDelivered();
+  try{
     const target = myBusiness.type === 'buyer' ? 'supplier' : 'buyer';
     await sb.rpc('increment_conversation_unread', { p_conversation_id: conv.conversationRowId, p_target: target });
-  }catch(e){ console.warn('Message send failed:', e); markFailed(); }
+  }catch(e){ console.warn('Unread count increment failed:', e); }
+}
+// Viber-style reconnect handling: walks every conversation for messages that never actually
+// reached the server (composed offline, or an online send that failed) and re-sends each one in
+// place. This replaces the old online-handler behavior of just clearing every message's "pending"
+// flag with no retry at all — which made a message that had genuinely never been saved LOOK
+// delivered the second the network came back, right up until the next reload silently dropped it
+// for good (see loadMyConversations, which now also preserves these across that reload).
+async function retryPendingMessages(){
+  if(!myBusiness || isOffline) return;
+  for(const conv of getConversations()){
+    const pending = (conv.messages||[]).filter(m => m._pendingSync);
+    for(const msg of pending) await sendRealMessage(conv, msg);
+  }
+  renderConversationList();
 }
 // Mirrors the read locally (conv.unread = 0, set in selectConversation()) back to Supabase, so
 // the other side's unread badge for this thread is accurate next time they load their list.
@@ -3650,7 +3706,11 @@ window.addEventListener('online', () => {
   const row = document.getElementById('offlineDraftExportRow');
   if(row) row.classList.add('hidden');
   purchaseOrders.forEach(po => { po._pendingSync = false; (po.history||[]).forEach(h=>{ h._pendingSync = false; }); });
-  getConversations().forEach(c => (c.messages||[]).forEach(m => { m._pendingSync = false; }));
+  // Real accounts get an actual retry of every unsent message (see retryPendingMessages) instead
+  // of having the pending flag cleared with nothing behind it; the demo has no server to retry
+  // against, so its messages just drop the flag as before.
+  if(myBusiness) retryPendingMessages();
+  else getConversations().forEach(c => (c.messages||[]).forEach(m => { m._pendingSync = false; }));
   if(document.getElementById('orderRows')) renderOrdersTable();
   if(document.getElementById('supplierOrderRows')) renderSupplierOrdersTable();
   if(activeConvId){ const conv = getConversations().find(c=>c.id===activeConvId); if(conv) renderThread(conv); }
@@ -4223,6 +4283,10 @@ function renderSupplierDashboard(){
         <div style="font-size:15px;color:var(--ink);margin-top:2px;">Same free, no-friction invite you got — no listing fees, no exposure to competitors, ever. <span class="row-action" onclick="navigate('settings')">Track your referral rewards →</span></div>
       </div>
       <button class="btn btn-primary" onclick="navigate('invite')">Invite your own customers →</button>
+    </div>
+    <div class="panel-card" style="margin-bottom:20px;">
+      <div class="panel-head"><h2>💬 Messages</h2><span class="lnk" onclick="navigate('messages')">Open Messages →</span></div>
+      <div id="supplierRecentMessagesBox"></div>
     </div>
     <div id="supplierTodayPanel"></div>
     <div class="panel-card" style="margin-bottom:20px;">
@@ -6263,6 +6327,11 @@ function renderConversationList(){
       </div>`
     : `<div style="padding:24px;text-align:center;color:var(--ink);font-size:15.5px;">No conversations match.</div>`);
   updateMessagesBadge();
+  // Keeps the dashboard's Messages widget live off the same call every other message-list change
+  // already goes through (new message, retry-on-reconnect, marking read, etc.) instead of needing
+  // its own separate set of refresh hooks; the widget's own elId check no-ops when that dashboard
+  // isn't currently in the DOM.
+  renderRecentMessagesWidget(currentAppRole==='supplier' ? 'supplierRecentMessagesBox' : 'buyerRecentMessagesBox');
 }
 function setMsgFilter(f, el){
   msgFilter = f;
@@ -8430,9 +8499,48 @@ function renderPipelineBars(stages, stageLabels, counts, total){
       <div style="width:90px;font-size:17px;font-weight:800;color:var(--ink);text-align:right;flex-shrink:0;">${counts[i]} of ${total}</div>
     </div>`).join('') : `<div style="color:var(--ink);font-size:17px;">No active orders right now.</div>`;
 }
+// The user's own words: chat is "the main and best way how b2b communications funnel through" for
+// businesses that already have a relationship, so it shouldn't take clicking into the Messages
+// page to find out something needs a reply — this surfaces the 3 conversations most worth opening
+// (unread first, then most recently active) right on the dashboard, the first thing either side
+// sees on login, each one clicking straight into that thread via the same navigate+selectConversation
+// pattern used everywhere else in the app (see messageSupplier, the send-confirmation "Open full
+// thread" link, etc.) rather than adding a second, competing way to open a conversation.
+function renderRecentMessagesWidget(elId){
+  const el = document.getElementById(elId);
+  if(!el) return;
+  const convs = getConversations();
+  if(!convs.length){
+    el.innerHTML = `<div style="text-align:center;color:var(--ink);padding:20px;font-size:15px;">No conversations yet — messages with your ${currentAppRole==='supplier'?'buyers':'suppliers'} will show up here.</div>`;
+    return;
+  }
+  // Messages within one conversation are already stored in chronological order (DB query orders
+  // by sent_at; local sends always append), so each conversation's own last entry IS its most
+  // recent message — but there's no reliably sortable time field to compare recency ACROSS
+  // conversations finer than the day (`date` is a plain YYYY-MM-DD string). Day-level is enough
+  // for "which 3 threads are worth surfacing"; a stable sort keeps same-day ties in their existing
+  // relative order rather than reaching for a false precision id/uuid tiebreak.
+  const lastActivity = c => { const last = c.messages[c.messages.length-1]; return last ? (last.date||'') : ''; };
+  const sorted = [...convs].sort((a,b)=>{
+    if((b.unread>0) !== (a.unread>0)) return (b.unread>0) ? 1 : -1;
+    return lastActivity(b).localeCompare(lastActivity(a));
+  }).slice(0,3);
+  el.innerHTML = sorted.map(c=>{
+    const last = c.messages[c.messages.length-1];
+    const preview = last ? (last.attachment ? '📎 '+last.attachment.name : last.text) : 'No messages yet';
+    return `<div class="row-item" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;" onclick="navigate('messages'); selectConversation('${c.id}');">
+      <div style="min-width:0;">
+        <div class="row-name">${c.name}</div>
+        <div class="row-sub" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:360px;">${preview}${pendingSyncTagHtml(last)}</div>
+      </div>
+      ${c.unread>0 ? `<span class="conv-unread-badge">${c.unread}</span>` : ''}
+    </div>`;
+  }).join('');
+}
 function renderBuyerDashboardWidgets(){
   const pipelineEl = document.getElementById('buyerPipelineBox');
   const activityEl = document.getElementById('buyerActivityBox');
+  renderRecentMessagesWidget('buyerRecentMessagesBox');
   if(!pipelineEl) return;
   const active = getBuyerPOs().filter(o=>o.status!=='cancelled');
   const counts = BUYER_PIPELINE_STAGES.map(s=>active.filter(o=>buyerPipelineBucket(o.status)===s).length);
@@ -8444,6 +8552,7 @@ function renderBuyerDashboardWidgets(){
 }
 function renderSupplierDashboardWidgets(){
   const pipelineEl = document.getElementById('supplierPipelineBox');
+  renderRecentMessagesWidget('supplierRecentMessagesBox');
   if(!pipelineEl) return;
   const active = getSupplierPOs().filter(o=>o.status!=='draft' && o.status!=='cancelled');
   const counts = FULFILL_STAGES.map(s=>active.filter(o=>fulfillBucket(o.status)===s).length);
@@ -19672,6 +19781,7 @@ async function bootNifti(){
     subscribeToBusinessRelationships();
     await loadMyConversations();
     subscribeToConversations();
+    retryPendingMessages(); // picks up anything still unsent from before this reload (see loadMyConversations) if we're already back online
     await loadMyRfqs();
     subscribeToRfqs();
     subscribeToTeamAndRoles();
