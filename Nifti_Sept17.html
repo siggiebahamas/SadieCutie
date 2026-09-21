@@ -423,7 +423,7 @@
 
   /* dashboard pills v2 — bigger icons (70% fill), stronger color wash */
   .stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;}
-  .stat-card{border-radius:14px;border:1px solid var(--border);display:flex;align-items:stretch;padding:0;}
+  .stat-card{border-radius:14px;border:1px solid var(--border);display:flex;align-items:stretch;padding:0;box-shadow:0 2px 8px rgba(24,26,30,.06);}
   .stat-card.neutral{background:var(--surface);}
   .stat-card.green{background:var(--green-soft);border-color:#BFE0CC;}
   .stat-card.amber{background:var(--warn-soft);border-color:#EBCE94;}
@@ -441,7 +441,7 @@
   .stat-num{font-family:var(--font-m);font-size:26px;font-weight:700;color:var(--ink);}
 
   .grid2{display:grid;grid-template-columns:1.3fr 1fr;gap:18px;}
-  .panel-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;}
+  .panel-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;box-shadow:0 2px 8px rgba(24,26,30,.06);}
   .panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;}
   .panel-head h2{font-size:19px;font-weight:800;}
   .panel-head a,.panel-head span.lnk{font-size:16px;color:var(--green);font-weight:600;cursor:pointer;}
@@ -469,7 +469,7 @@
   .pdot.active{border-color:var(--green);color:var(--green);font-weight:700;}
   .plabel{font-size:15px;color:var(--faint);text-align:center;max-width:80px;font-weight:600;}
 
-  table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;}
+  table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(24,26,30,.06);}
   thead th{text-align:left;font-size:16.5px;font-weight:800;color:#000000;text-transform:uppercase;letter-spacing:.03em;padding:15px 20px;border-bottom:1px solid #1B6B40;background:#DCEEE1;}
   .orders-table thead th{background:#DCEEE1;color:#000000;border-bottom:1px solid #1B6B40;text-align:center;}
   .suppliers-table thead th{text-align:center;}
@@ -500,11 +500,16 @@
   .tag-protected{background:var(--green-soft);color:var(--green);}
   .row-action{font-size:16px;font-weight:700;color:var(--green);cursor:pointer;}
   .toolbar{display:flex;gap:12px;margin-bottom:16px;}
-  .chip-filter{display:flex;gap:8px;flex-wrap:wrap;}
+  /* Sunken-well toolbar tray — previously these rows had no container of their own, so a row of
+     filter chips just floated with nothing visually grouping it (and nothing separating it from
+     the page behind it). Framed as a recessed strip now, consistent everywhere chip-filter/
+     tabs-row is used: a genuine groove against a white card (e.g. Settings > Display), and a
+     bordered, clearly-a-toolbar band on pages with no card wrapper (e.g. My Suppliers, Orders). */
+  .chip-filter{display:flex;gap:8px;flex-wrap:wrap;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:8px;}
   .chip{padding:9px 16px;border-radius:100px;border:1px solid var(--border);background:var(--surface);font-size:15.5px;font-weight:600;color:var(--ink);cursor:pointer;}
   .chip.active{background:var(--ink);color:#fff;border-color:var(--ink);}
 
-  .tabs-row{display:flex;gap:8px;margin-bottom:18px;}
+  .tabs-row{display:flex;gap:8px;margin-bottom:18px;background:var(--bg);border:1px solid var(--border);border-radius:11px;padding:6px;}
   .tab{padding:8px 16px;border-radius:9px;border:1px solid var(--border);background:var(--surface);font-size:15px;font-weight:700;color:var(--body);cursor:pointer;}
   .tab.active{background:var(--ink);color:#fff;border-color:var(--ink);}
   .layout{display:grid;grid-template-columns:1fr 420px;gap:24px;}
@@ -556,7 +561,7 @@
   .row-action-group{display:flex;gap:14px;justify-content:flex-end;align-items:center;}
 
   .layout-2{display:grid;grid-template-columns:1fr 1fr;gap:24px;}
-  .form-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:26px;}
+  .form-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:26px;box-shadow:0 2px 8px rgba(24,26,30,.06);}
   .form-card h2{font-size:19px;font-weight:800;margin-bottom:18px;}
   .form-card .field select{width:100%;height:48px;padding:0 36px 0 15px;border:1.5px solid var(--border);border-radius:9px;font-family:var(--font-b);font-size:16.5px;background-color:var(--surface);color:var(--ink);box-sizing:border-box;-webkit-appearance:none;-moz-appearance:none;appearance:none;background-image:url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23555' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:16px;}
   .form-card .field textarea{width:100%;padding:13px 15px;border:1.5px solid var(--border);border-radius:9px;font-family:var(--font-b);font-size:16.5px;background:var(--surface);color:var(--ink);box-sizing:border-box;}
@@ -661,7 +666,7 @@
   .logic-panel h4:first-child{margin-top:0;}
   .logic-panel code{font-family:var(--font-m);background:var(--surface);padding:1px 5px;border-radius:4px;border:1px solid var(--border);}
 
-  .settings-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;margin-bottom:18px;}
+  .settings-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;margin-bottom:18px;box-shadow:0 2px 8px rgba(24,26,30,.06);}
   .settings-card h2{font-size:19px;font-weight:800;margin-bottom:4px;}
   .settings-card .sub{font-size:15px;color:var(--faint);margin-bottom:18px;}
   .row-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
@@ -6067,7 +6072,11 @@ function sendMessage(){
   const conv = getConversations().find(c=>c.id===activeConvId);
   const today = new Date(2026,7,26);
   const dateStr = today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
-  conv.messages.push({from:'me', text: text, time:'Just now', date: dateStr, attachment: pendingAttachment, _pendingSync: isOffline});
+  // Sending while a specific PO's tab is open tags the message with that PO — otherwise it was
+  // only ever visible under "All messages," making the PO tab look dead/broken the moment
+  // someone actually used it to have a conversation instead of just reading old history.
+  const poRef = msgPoFilter !== 'all' ? msgPoFilter : undefined;
+  conv.messages.push({from:'me', text: text, time:'Just now', date: dateStr, attachment: pendingAttachment, poRef, _pendingSync: isOffline});
   capConversationMessages(conv);
   input.value = '';
   input.style.height = 'auto';
@@ -18296,7 +18305,10 @@ function simulateThreadReply(){
   setTimeout(()=>{
     threadTypingConvId = null;
     const text = THREAD_SIMULATED_REPLIES[c.messages.length % THREAD_SIMULATED_REPLIES.length];
-    c.messages.push({from:'them', text, time:'Just now', date:APP_TODAY});
+    // Same fix as sendMessage(): a reply simulated while viewing a specific PO's tab needs to
+    // carry that PO's reference, or it silently only shows up under "All messages."
+    const poRef = msgPoFilter !== 'all' ? msgPoFilter : undefined;
+    c.messages.push({from:'them', text, time:'Just now', date:APP_TODAY, poRef});
     capConversationMessages(c);
     renderThread(c);
     renderConversationList();
