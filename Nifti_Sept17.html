@@ -3507,6 +3507,14 @@ function applyRealAccountUI(){
   const supEmailEl = document.getElementById('supEmail'); if(supEmailEl) supEmailEl.value = '';
   if(typeof messageEdited !== 'undefined') messageEdited = false;
   if(document.getElementById('chatPreview')) updatePreview();
+  // "Preview either side's metrics" only makes sense for the demo, where one browser session
+  // plays both a buyer and a supplier persona at once. A real account is only ever one of the
+  // two — its ME_BUYER/ME_SUPPLIER globals aren't both real business ids, and suppliersData/
+  // buyersData only ever gets replaced with real data on the side matching myBusiness.type (see
+  // loadMyConnections) — so switching to the other side here would show either an empty shell or
+  // the untouched demo seed data, dressed up as if it were this account's own real numbers.
+  const analyticsToggle = document.querySelector('#page-analytics .role-toggle-wrap');
+  if(analyticsToggle) analyticsToggle.classList.add('hidden');
 }
 
 /* ============ NAVIGATION ============ */
@@ -13565,11 +13573,18 @@ function getVisibleMetrics(){
   const selected = currentAnalyticsRole==='buyer' ? selectedBuyerMetrics : selectedSupplierMetrics;
   let metrics = all.filter(m=>selected.includes(m.id));
   if(currentAnalyticsRole==='buyer' && currentSkuFilter!=='all'){
-    const overrides = skuMetricOverrides[currentSkuFilter];
-    metrics = metrics.map(m=>{
-      if(m.skuAware && overrides && overrides[m.id]) return {...m, ...overrides[m.id]};
-      return m;
-    });
+    if(myBusiness){
+      // Real accounts don't have a real per-SKU breakdown for these yet — rather than silently
+      // ignoring the filter (looks broken) or applying the old fake canned per-SKU numbers below
+      // (looks like real data that isn't), say plainly that the figure is still account-wide.
+      metrics = metrics.map(m => m.skuAware ? {...m, d: m.d + ' · account-wide, not yet split by SKU'} : m);
+    } else {
+      const overrides = skuMetricOverrides[currentSkuFilter];
+      metrics = metrics.map(m=>{
+        if(m.skuAware && overrides && overrides[m.id]) return {...m, ...overrides[m.id]};
+        return m;
+      });
+    }
   }
   return metrics;
 }
@@ -13744,9 +13759,9 @@ function getAxisTitles(){
       return {x:'Date', y: unitMatch ? unitMatch[1] : 'Price'};
     }
     if(currentMetric==='volume') return {x:'Date', y:'Orders placed'};
-    if(currentMetric==='spend')  return {x:'Date', y:'Spend (₱ thousands)'};
+    if(currentMetric==='spend')  return {x:'Date', y: myBusiness ? 'Spend (₱)' : 'Spend (₱ thousands)'};
   } else {
-    if(currentMetric==='revenue') return {x:'Date', y:'Revenue (₱ thousands)'};
+    if(currentMetric==='revenue') return {x:'Date', y: myBusiness ? 'Revenue (₱)' : 'Revenue (₱ thousands)'};
     if(currentMetric==='orders')  return {x:'Date', y:'Orders fulfilled'};
     if(currentMetric==='ontime')  return {x:'Date', y:'On-time rate (%)'};
   }
@@ -13815,6 +13830,222 @@ const spendDailyData           = genSeries(90, 16, 0.04, 3, 115);
 const revenueDailyData         = genSeries(90, 15, 0.05, 3.2, 116);
 const ordersFulfilledDailyData = genSeries(90, 1, 0.006, 1, 117).map(v=>Math.max(0,v));
 const ontimeDailyData          = genSeries(90, 96, 0.01, 2, 118).map(v=>Math.min(100,Math.max(0,v)));
+
+/* ============ REAL TREND DATA (signed-in accounts) ============
+   The chart above was fully synthetic — a deterministic random walk seeded once at page load,
+   identical for every account, real or demo, and anchored to the demo's fixed clock (ending Aug
+   26 '26) regardless of what today actually is. For a real account this showed numbers with no
+   connection to what actually happened in their business, on a calendar that wasn't even theirs.
+   Below: the same chart, same range tabs, built from this account's own real purchase_orders,
+   anchored to today's real date.
+   Two different honesty rules, depending on what a metric means for a period with no orders in
+   it. Additive metrics (order count, spend, revenue) get a real zero for an empty period —
+   "nothing happened" is a true, useful data point. Point-in-time metrics (a price, an on-time
+   rate) do NOT get a zero for an empty period — "no orders that day" doesn't mean "the price was
+   ₱0" or "0% on time," so those periods are skipped rather than faked, and the range tabs (which
+   assume one point per calendar period) are hidden in favor of showing all real data points. */
+function realBucketLabel(d, monthly){
+  return monthly ? (MONTH_NAMES[d.getMonth()] + " '" + String(d.getFullYear()).slice(2)) : (MONTH_NAMES[d.getMonth()] + ' ' + d.getDate());
+}
+function realBucketKey(d, monthly){
+  return monthly ? (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')) : (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
+}
+function realBucketRange(n, monthly){
+  const today = new Date();
+  const out = [];
+  for(let i=n-1;i>=0;i--){
+    out.push(monthly ? new Date(today.getFullYear(), today.getMonth()-i, 1) : new Date(today.getFullYear(), today.getMonth(), today.getDate()-i));
+  }
+  return out;
+}
+function buildRealAdditiveSeries(orders, dateField, valueFn, n, monthly){
+  const buckets = realBucketRange(n, monthly);
+  const sums = {};
+  orders.forEach(o=>{
+    const raw = o[dateField];
+    if(!raw) return;
+    const key = monthly ? raw.slice(0,7) : raw.slice(0,10);
+    sums[key] = (sums[key]||0) + valueFn(o);
+  });
+  return {
+    labels: buckets.map(d=>realBucketLabel(d, monthly)),
+    data: buckets.map(d=>Math.round((sums[realBucketKey(d, monthly)]||0)*100)/100),
+  };
+}
+function realMonthMetaArr(){
+  const today = new Date();
+  const arr = [];
+  for(let i=59;i>=0;i--){ const d = new Date(today.getFullYear(), today.getMonth()-i, 1); arr.push({y:d.getFullYear(), m:d.getMonth()}); }
+  return arr;
+}
+// Mirrors sliceForRange()'s quarterly/yearly/custom grouping exactly, but against real calendar
+// months ending this real month, instead of the demo's fixed monthLabelsFull/monthMeta.
+function sliceRealForRange(range, seriesArr){
+  const meta = realMonthMetaArr();
+  const labelsFull = meta.map(d=>MONTH_NAMES[d.m]+" '"+String(d.y).slice(2));
+  if(range==='monthly'){
+    return { labels: labelsFull.slice(-12), series: seriesArr.map(s=>({...s, data:s.data.slice(-12)})) };
+  }
+  if(range==='quarterly'){
+    const labels24 = labelsFull.slice(-24);
+    const dataSlices = seriesArr.map(s=>s.data.slice(-24));
+    const newLabels = []; const newSeries = seriesArr.map(s=>({...s, data:[]}));
+    for(let i=0;i<labels24.length;i+=3){
+      newLabels.push('Q'+(Math.floor(i/3)+1));
+      dataSlices.forEach((arr,si)=>{ const chunk = arr.slice(i,i+3); newSeries[si].data.push(Math.round((chunk.reduce((a,b)=>a+b,0)/chunk.length)*100)/100); });
+    }
+    return { labels:newLabels, series:newSeries };
+  }
+  if(range==='yearly'){
+    const newLabels = []; const newSeries = seriesArr.map(s=>({...s, data:[]}));
+    for(let i=0;i<60;i+=12){
+      newLabels.push("'"+String(meta[i+11].y).slice(2));
+      seriesArr.forEach((s,si)=>{ const chunk = s.data.slice(i,i+12); newSeries[si].data.push(Math.round((chunk.reduce((a,b)=>a+b,0)/chunk.length)*100)/100); });
+    }
+    return { labels:newLabels, series:newSeries };
+  }
+  if(range==='custom'){
+    const fromVal = document.getElementById('customFrom').value;
+    const toVal = document.getElementById('customTo').value;
+    if(!fromVal || !toVal) return null;
+    const [fy,fm] = fromVal.split('-').map(Number);
+    const [ty,tm] = toVal.split('-').map(Number);
+    let startIdx = meta.findIndex(d=> d.y===fy && (d.m+1)===fm);
+    let endIdx = meta.findIndex(d=> d.y===ty && (d.m+1)===tm);
+    if(startIdx===-1) startIdx = 0;
+    if(endIdx===-1) endIdx = 59;
+    if(endIdx<startIdx) [startIdx,endIdx] = [endIdx,startIdx];
+    return { labels: labelsFull.slice(startIdx, endIdx+1), series: seriesArr.map(s=>({...s, data:s.data.slice(startIdx, endIdx+1)})) };
+  }
+  return null;
+}
+function isDateWithinRealRange(dateStr, range){
+  if(!dateStr) return false;
+  const d = new Date(dateStr+'T00:00:00');
+  const today = new Date(); today.setHours(0,0,0,0);
+  const dayWindow = {'7d':7,'14d':14,'30d':30,'60d':60,'90d':90}[range];
+  if(dayWindow){ const cutoff = new Date(today); cutoff.setDate(cutoff.getDate()-(dayWindow-1)); return d>=cutoff && d<=today; }
+  if(range==='monthly'){ const cutoff = new Date(today.getFullYear(), today.getMonth()-11, 1); return d>=cutoff; }
+  if(range==='quarterly'){ const cutoff = new Date(today.getFullYear(), today.getMonth()-23, 1); return d>=cutoff; }
+  if(range==='yearly') return true;
+  if(range==='custom'){
+    const fromVal = document.getElementById('customFrom').value;
+    const toVal = document.getElementById('customTo').value;
+    if(!fromVal || !toVal) return false;
+    const [fy,fm] = fromVal.split('-').map(Number);
+    const [ty,tm] = toVal.split('-').map(Number);
+    const from = new Date(fy, fm-1, 1);
+    const to = new Date(ty, tm, 0, 23, 59, 59);
+    return d>=from && d<=to;
+  }
+  return true;
+}
+function sumRealOrdersForRange(orders, dateField, valueFn, range){
+  if(range==='custom'){
+    const fromVal = document.getElementById('customFrom').value;
+    const toVal = document.getElementById('customTo').value;
+    if(!fromVal || !toVal) return null;
+  }
+  return orders.filter(o=>isDateWithinRealRange(o[dateField], range)).reduce((s,o)=>s+valueFn(o),0);
+}
+function isRealPointInTimeMetric(){
+  return !!myBusiness && ((currentAnalyticsRole==='buyer' && currentMetric==='price') || (currentAnalyticsRole==='supplier' && currentMetric==='ontime'));
+}
+// Real, distinct products this buyer has actually ordered — replaces the fixed cement/wire/rebar
+// catalog (which only ever made sense for the demo persona) in both the Price Trend product
+// picker and the KPI SKU filter.
+function getRealBuyerProductNames(){
+  const names = new Set();
+  getBuyerPOs().filter(o=>o.status!=='draft' && o.status!=='cancelled').forEach(o=>{
+    (o.lineItems||[]).forEach(li=>{ if(li.product) names.add(li.product); });
+  });
+  return Array.from(names).sort();
+}
+function populateRealProductSelect(){
+  const products = getRealBuyerProductNames();
+  const sel = document.getElementById('productSelect');
+  if(sel) sel.innerHTML = products.length ? products.map(p=>`<option value="${p}">${p}</option>`).join('') : `<option value="">No products ordered yet</option>`;
+  const skuSel = document.getElementById('skuFilterSelect');
+  if(skuSel) skuSel.innerHTML = `<option value="all" selected>All SKUs</option>` + products.map(p=>`<option value="${p}">${p}</option>`).join('');
+}
+function renderRealPointInTimeChart(){
+  document.getElementById('chartMetaNote').textContent = '';
+  let points, label, color, yTitle, emptyHint;
+  if(currentAnalyticsRole==='buyer'){
+    const productSel = document.getElementById('productSelect');
+    const product = productSel ? productSel.value : '';
+    const orders = product ? getBuyerPOs().filter(o=>o.status!=='draft' && o.status!=='cancelled' && (o.lineItems||[]).some(li=>li.product===product)) : [];
+    points = orders.map(o=>{
+      const li = o.lineItems.find(li=>li.product===product);
+      return { key:o.createdDate, value: li.unitPrice };
+    }).filter(p=>p.key).sort((a,b)=>a.key.localeCompare(b.key));
+    label = product || 'Price'; color = '#1B6B40'; yTitle = 'Price (₱)';
+    emptyHint = 'Once a couple of orders for this product go through, its real price trend will show here.';
+  } else {
+    const orders = getSupplierPOs().filter(o=>poIsDelivered(o) && o.deliveryConfirmation);
+    const byDate = {};
+    orders.forEach(o=>{ if(!o.createdDate) return; if(!byDate[o.createdDate]) byDate[o.createdDate]={num:0,den:0}; byDate[o.createdDate].den++; if(poDeliveredOnTime(o)) byDate[o.createdDate].num++; });
+    points = Object.keys(byDate).sort().map(k=>({key:k, value: Math.round((byDate[k].num/byDate[k].den)*100)}));
+    label = 'On-time rate (%)'; color = '#1B6B40'; yTitle = 'On-time rate (%)';
+    emptyHint = 'Once a couple of delivered orders are on file, your real on-time rate trend will show here.';
+  }
+  document.getElementById('chartLegend').innerHTML = `<span><span class="legend-dot" style="background:${color}"></span>${label}</span>`;
+  if(points.length < 2){
+    document.getElementById('mainChart').innerHTML = '';
+    renderChartPlaceholder('Not enough order history yet', emptyHint);
+    return;
+  }
+  const oldPlaceholder = document.getElementById('mainChartPlaceholder');
+  if(oldPlaceholder) oldPlaceholder.remove();
+  const labels = points.map(p=>{ const d = new Date(p.key+'T00:00:00'); return MONTH_NAMES[d.getMonth()]+' '+d.getDate(); });
+  const series = [{label, color, data: points.map(p=>p.value)}];
+  document.getElementById('mainChart').innerHTML = buildLineChartSVG(labels, series, 'Order date', yTitle);
+}
+function getRealAdditiveChartConfig(){
+  if(currentAnalyticsRole==='buyer'){
+    const supId = document.getElementById('supplierFilterSelect') ? document.getElementById('supplierFilterSelect').value : 'all';
+    const base = getBuyerPOs().filter(o=>o.status!=='draft' && o.status!=='cancelled' && (supId==='all'||o.supplierId===supId));
+    if(currentMetric==='volume') return {orders:base, valueFn:()=>1, label: supId==='all' ? 'Order Volume' : 'Order Volume — '+supplierNameById(supId), color:'#1B6B40', fill:false, yTitle:'Orders placed'};
+    if(currentMetric==='spend')  return {orders:base, valueFn:poTotal, label: supId==='all' ? 'Spend (₱)' : 'Spend (₱) — '+supplierNameById(supId), color:'#1B6B40', fill:true, yTitle:'Spend (₱)'};
+  } else {
+    const base = getSupplierPOs().filter(o=>poIsDelivered(o));
+    if(currentMetric==='revenue') return {orders:base, valueFn:poTotal, label:'Revenue (₱)', color:'#1B6B40', fill:true, yTitle:'Revenue (₱)'};
+    if(currentMetric==='orders')  return {orders:base, valueFn:()=>1, label:'Orders fulfilled', color:'#9C5A33', fill:false, yTitle:'Orders fulfilled'};
+  }
+  return {orders:[], valueFn:()=>0, label:'', color:'#1B6B40', fill:false, yTitle:''};
+}
+function renderRealAdditiveChart(){
+  const cfg = getRealAdditiveChartConfig();
+  document.getElementById('chartMetaNote').textContent = '';
+  if(!cfg.orders.length){
+    document.getElementById('mainChart').innerHTML = '';
+    document.getElementById('chartLegend').innerHTML = '';
+    renderChartPlaceholder('No orders yet', currentAnalyticsRole==='buyer' ? 'Once you place a few orders, this trend will show here.' : 'Once you fulfill a few orders, this trend will show here.');
+    return;
+  }
+  const dailyRangeDays = {'7d':7,'14d':14,'30d':30,'60d':60,'90d':90};
+  let labels, data;
+  if(dailyRangeDays[currentChartRange]){
+    const n = dailyRangeDays[currentChartRange];
+    const built = buildRealAdditiveSeries(cfg.orders, 'createdDate', cfg.valueFn, n, false);
+    labels = built.labels; data = built.data;
+  } else {
+    const built = buildRealAdditiveSeries(cfg.orders, 'createdDate', cfg.valueFn, 60, true);
+    const sliced = sliceRealForRange(currentChartRange, [{data:built.data}]);
+    if(!sliced){
+      document.getElementById('mainChart').innerHTML = '';
+      document.getElementById('chartLegend').innerHTML = '';
+      renderChartPlaceholder('Pick a date range', 'Choose a start and end month above, then click Apply.');
+      return;
+    }
+    labels = sliced.labels; data = sliced.series[0].data;
+  }
+  const oldPlaceholder = document.getElementById('mainChartPlaceholder');
+  if(oldPlaceholder) oldPlaceholder.remove();
+  const series = [{label:cfg.label, color:cfg.color, data, fill:cfg.fill}];
+  document.getElementById('chartLegend').innerHTML = `<span><span class="legend-dot" style="background:${cfg.color}"></span>${cfg.label}</span>`;
+  document.getElementById('mainChart').innerHTML = buildLineChartSVG(labels, series, 'Date', cfg.yTitle);
+}
 
 function getCurrentDailySeriesSet(){
   if(currentAnalyticsRole==='buyer'){
@@ -13892,7 +14123,10 @@ function populateMetricSelect(){
   sel.innerHTML = opts.map(o=>`<option value="${o.key}">${o.label}</option>`).join('');
   currentMetric = opts[0].key;
   sel.value = currentMetric;
-  if(currentAnalyticsRole==='buyer') populateSupplierFilterSelect();
+  if(currentAnalyticsRole==='buyer'){
+    populateSupplierFilterSelect();
+    if(myBusiness) populateRealProductSelect();
+  }
   updateChartFilterVisibility();
 }
 function currentMetricMeta(){
@@ -13903,7 +14137,7 @@ function updateChartFilterVisibility(){
   const m = currentMetricMeta();
   document.getElementById('productSelect').classList.toggle('hidden', !(m && m.needsProduct));
   document.getElementById('supplierFilterSelect').classList.toggle('hidden', !(m && m.needsSupplierFilter));
-  const showRange = !(m && m.isBreakdown) || (m && m.hasRange);
+  const showRange = (!(m && m.isBreakdown) || (m && m.hasRange)) && !isRealPointInTimeMetric();
   document.getElementById('rangeTabs').classList.toggle('hidden', !showRange);
   document.getElementById('customRangeRow').classList.add('hidden');
   document.getElementById('chartMetaNote').textContent = (m && m.needsSupplierFilter) ? 'Tip: filter to one supplier to compare them against your overall average.' : '';
@@ -14052,6 +14286,13 @@ function sumSeriesForRange(range, dailyData, monthlyData){
   return null;
 }
 function getSpendBySupplierDataForRange(range){
+  if(myBusiness){
+    return suppliersData.map(s=>{
+      const orders = getBuyerPOs().filter(o=>o.status!=='draft' && o.status!=='cancelled' && o.supplierId===s.id);
+      const total = sumRealOrdersForRange(orders, 'createdDate', poTotal, range);
+      return {id:s.id, label:s.name, value: total===null ? null : Math.round(total), color:'#1B6B40'};
+    }).sort((a,b)=>(b.value||0)-(a.value||0));
+  }
   return suppliersData.map(s=>{
     const dailyScaled = scaleSeriesForSupplier(spendDailyData, s.id);
     const monthlyScaled = scaleSeriesForSupplier(spendSeriesData.data, s.id);
@@ -14101,6 +14342,11 @@ function renderMainChart(role){
   const m = currentMetricMeta();
   if(m && m.isBreakdown){
     renderBreakdownChart();
+    return;
+  }
+  if(myBusiness){
+    if(isRealPointInTimeMetric()) renderRealPointInTimeChart();
+    else renderRealAdditiveChart();
     return;
   }
 
