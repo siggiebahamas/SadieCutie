@@ -1803,29 +1803,43 @@
   <div class="nav-cta"><a onclick="navigate('login')" class="login-link">Log in</a><a onclick="navigate('login')" class="btn btn-primary">Get started</a></div>
 </div></nav>
 <section class="feat-section"><div class="wrap" style="max-width:820px;">
-  <h1 style="margin-bottom:6px;">Privacy &amp; Security</h1>
+  <h1 style="margin-bottom:6px;">Privacy Policy</h1>
+  <p style="font-size:14.5px;color:var(--ink);opacity:.7;margin-bottom:16px;">Last updated: [date] · Effective for pilot use of Nifti</p>
   <div style="background:var(--warn-soft);border:1px solid var(--warn);border-radius:10px;padding:16px 18px;margin:14px 0 24px;font-size:15px;color:#7A4E10;line-height:1.6;">
-    <strong>This is a draft, for a prototype product — not a live, legally-reviewed policy.</strong> Nifti is not an operating company; nobody's real data is collected under this text today. It describes, accurately, what this specific application actually does and does not do, so a real version of this page has an honest starting point. It has not been reviewed by a lawyer, makes no compliance claims (Philippine Data Privacy Act, GDPR, or otherwise), and must not be published as-is. Nothing here is legal advice.
+    <strong>This describes what Nifti actually does today, for a small pilot.</strong> It has not been reviewed by a lawyer. It is written to be accurate and honest about real data handling, but before Nifti is opened beyond a small group of trusted pilot users, get this reviewed by counsel familiar with the Philippine Data Privacy Act (RA 10173) — especially given real payment data is involved. Nothing here is legal advice.
   </div>
 
-  <h2 style="font-size:20px;margin-bottom:10px;">What this build actually does with data</h2>
-  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">Everything you enter — orders, inventory, supplier and buyer records, messages, pricing — is held in this browser tab's own memory. If this file is opened through a Claude surface that provides a storage API, that same data is saved so it survives a reload; otherwise nothing persists past the session. Either way: <strong>there is no Nifti server. No data is transmitted anywhere, sold, or shared with a third party</strong> — there's no third party to share it with. This is the honest, verifiable behavior of the file itself, not a promise about a future backend.</p>
-
-  <h2 style="font-size:20px;margin:22px 0 10px;">What a real, production version would need (and doesn't have yet)</h2>
+  <h2 style="font-size:20px;margin-bottom:10px;">What data we collect</h2>
   <ul style="font-size:15.5px;line-height:1.9;padding-left:22px;margin-bottom:14px;">
-    <li>A real backend with encryption in transit and at rest, run by an actual company that can be held accountable — not a browser tab.</li>
-    <li>A real legal review against the Philippine Data Privacy Act (RA 10173) and any other jurisdiction Nifti actually operates in, done by a lawyer, not generated text.</li>
-    <li>A named Data Protection Officer and a real process for data subject requests (access, correction, deletion).</li>
-    <li>A real incident response plan, tested against real infrastructure.</li>
-    <li>Data processing agreements with any real third-party service Nifti would actually use (e.g. a payment processor for Step 16's billing, if it became real).</li>
+    <li><strong>Account &amp; business information</strong> — your name, email, business name and type (buyer/supplier), and the team members you invite.</li>
+    <li><strong>Business records</strong> — purchase orders, inventory and stock levels, supplier/buyer relationships, standing price agreements, and messages exchanged with counterparties on the platform.</li>
+    <li><strong>Payment information</strong> — Nifti never stores your card, GCash, or Maya credentials. Payments are processed directly by PayMongo (our payment processor); we store only the transaction result (amount, status, reference number).</li>
+    <li><strong>Usage data</strong> — basic technical data (browser type, general error logs) to keep the app working correctly.</li>
   </ul>
 
-  <h2 style="font-size:20px;margin:22px 0 10px;">Security — what's actually built here, described plainly</h2>
-  <p style="font-size:15.5px;line-height:1.7;margin-bottom:10px;">These are real, working parts of this build (you can find them in the product): role-based permissions enforced at the point of every mutating action, not just by hiding a button; an audit log that records who changed what, including denied attempts; and a data-confidence layer that marks every record with its source and never presents an unverified number as if it were certain.</p>
-  <p style="font-size:15.5px;line-height:1.7;margin-bottom:10px;"><strong>What that does not mean:</strong> none of the above is a substitute for real infrastructure security. There's no encryption at rest (there's no "rest" — it's in-memory or browser storage), no penetration testing, no security audit, no SOC 2 or ISO 27001 certification, and no claim of any of those things. A person opening this file's source can read everything in it, same as any client-side code.</p>
+  <h2 style="font-size:20px;margin:22px 0 10px;">Where it's stored</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">Your data is stored in a Supabase-hosted PostgreSQL database, transmitted over encrypted HTTPS connections. Access to your business's data is enforced at the database level (row-level security) — a business can only ever read or write its own records, or records a counterparty has explicitly shared with it (e.g. a purchase order between a specific buyer and supplier). Team members within your business see only what their assigned role permits.</p>
 
-  <h2 style="font-size:20px;margin:22px 0 10px;">Suppliers specifically</h2>
-  <p style="font-size:15.5px;line-height:1.7;">Per the product's own design, a buyer's connections stay private by default — a supplier only ever sees the orders, messages, and pricing shared directly with them, never another buyer's data. That's a real, built access-control rule (Step 3), not a policy promise layered on top.</p>
+  <h2 style="font-size:20px;margin:22px 0 10px;">Who we share data with</h2>
+  <ul style="font-size:15.5px;line-height:1.9;padding-left:22px;margin-bottom:14px;">
+    <li><strong>Supabase</strong> — our database and authentication infrastructure provider.</li>
+    <li><strong>PayMongo</strong> — processes GCash/Maya payments; receives only what's needed to process a transaction.</li>
+    <li><strong>Your counterparties</strong> — a supplier you send a PO to sees that order's details; a buyer you're connected to sees the pricing and catalog you've shared with them. Nothing is visible to a business you haven't connected with.</li>
+  </ul>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">We do not sell your data, and we do not share it with anyone outside the above without your consent or a legal requirement to do so.</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">Your rights</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">You can access, correct, or delete your business's data at any time from within the app, or by contacting us at <strong>[your support email]</strong>. If you close your account, we'll remove your data within a reasonable period, except where we're required to retain records (e.g. for financial/tax purposes).</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">Security — what's actually built</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:10px;">Role-based permissions enforced at the point of every action, not just by hiding a button; an audit log recording who changed what, including denied attempts; row-level security so no business can query another's data even through a bug in the app itself.</p>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:10px;"><strong>What this pilot does not yet have:</strong> a formal security audit, penetration testing, or SOC 2/ISO 27001 certification. Reasonable, but not enterprise-grade — appropriate for a small trusted pilot, not yet for handling sensitive data at scale.</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">Changes to this policy</h2>
+  <p style="font-size:15.5px;line-height:1.7;">We'll update this page as the product changes, and let pilot users know of any material change directly.</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">Contact</h2>
+  <p style="font-size:15.5px;line-height:1.7;">Questions about this policy or your data: <strong>[your support email]</strong>.</p>
 </div></section>
 <footer><div class="wrap foot-inner">
   <div class="foot-brand"><strong>Nifti</strong></div>
@@ -1833,7 +1847,7 @@
 </div></footer>
 </div>
 
-<!-- ============ TERMS OF SERVICE (Step 19 — see disclaimer banner in-page) ============ -->
+<!-- ============ TERMS OF SERVICE ============ -->
 <div id="view-terms" class="marketing-view hidden">
 <nav class="top"><div class="inner">
   <div class="brand"><strong>Nifti</strong></div>
@@ -1842,20 +1856,46 @@
 </div></nav>
 <section class="feat-section"><div class="wrap" style="max-width:820px;">
   <h1 style="margin-bottom:6px;">Terms of Service</h1>
+  <p style="font-size:14.5px;color:var(--ink);opacity:.7;margin-bottom:16px;">Last updated: [date] · Effective for pilot use of Nifti</p>
   <div style="background:var(--warn-soft);border:1px solid var(--warn);border-radius:10px;padding:16px 18px;margin:14px 0 24px;font-size:15px;color:#7A4E10;line-height:1.6;">
-    <strong>This is a draft, for a prototype product — not a binding legal contract.</strong> Nifti is not a registered business and this page creates no legal agreement with anyone. It has not been reviewed by a lawyer. A real launch needs real counsel, not generated boilerplate presented as enforceable terms. Nothing here is legal advice.
+    <strong>This is a working draft for a small pilot, not lawyer-reviewed language.</strong> It's written to be a real, usable agreement for pilot users — get it reviewed by counsel before opening Nifti beyond a small trusted group, particularly given real payments are processed through it. Nothing here is legal advice.
   </div>
 
-  <h2 style="font-size:20px;margin-bottom:10px;">What real terms for this specific product would need to cover</h2>
-  <ul style="font-size:15.5px;line-height:1.9;padding-left:22px;margin-bottom:14px;">
-    <li><strong>The free-supplier model</strong> — suppliers use Nifti at no cost, on every plan, permanently; that commitment (real in this build's pricing design, Step 16) would need to be a real contractual term, not just marketing copy.</li>
-    <li><strong>Buyer subscription terms</strong> — the plan tiers, trial conversion, billing cycle, and cancellation behavior already modeled in Settings → Billing &amp; Plan: what happens to data on downgrade (nothing is deleted, per this build's own design) needs to be a real, binding commitment, not just current behavior.</li>
-    <li><strong>Acceptable use</strong> — no using the platform to facilitate fraud, to misrepresent a business relationship, or to access data outside a person's actual role (Step 3's permission model would need to be backed by a real contractual prohibition, not just a technical control).</li>
-    <li><strong>Limitation of liability and warranty disclaimers</strong> — standard for this kind of B2B software, drafted by counsel familiar with Philippine contract law and whatever other jurisdictions apply.</li>
-    <li><strong>Dispute resolution and governing law</strong> — needs a real decision by the business and its lawyers, not a default clause copied from elsewhere.</li>
-    <li><strong>Data ownership</strong> — a buyer's and supplier's own business records (orders, pricing, inventory) remain theirs; Nifti's role is to host and process it, not to claim ownership. This should be stated explicitly and unambiguously.</li>
-  </ul>
-  <p style="font-size:15.5px;line-height:1.7;">None of the above is filled in with real legal language here, on purpose — a placeholder clause that sounds authoritative is worse than an honest gap, because it invites someone to ship it without the legal review it actually needs.</p>
+  <h2 style="font-size:20px;margin-bottom:10px;">1. Acceptance of terms</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">By creating an account or using Nifti, you agree to these terms. If you're using Nifti on behalf of a business, you're confirming you have the authority to bind that business to these terms.</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">2. What Nifti is</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">Nifti is a procurement platform connecting buyers and suppliers — purchase orders, inventory tracking, messaging, price agreements, and payment processing. This is a pilot version: expect bugs, and treat it as a tool you're helping test, not a finished, guaranteed-stable product.</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">3. Accounts</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">You're responsible for the accuracy of the information you provide and for keeping your login credentials secure. Team members you invite act on your business's behalf according to the role you assign them.</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">4. Suppliers &amp; buyers, pricing</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">Suppliers use Nifti at no cost. Buyer accounts may be on a free trial or paid plan as shown in Settings → Billing. Data is never deleted on downgrade — you keep access to your own historical records regardless of plan.</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">5. Acceptable use</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">You agree not to use Nifti to commit fraud, misrepresent a business relationship, access data outside your assigned role, or interfere with the platform's normal operation.</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">6. Payments</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">Payments made through Nifti (GCash, Maya) are processed by PayMongo, a licensed third-party payment processor. Nifti does not hold or transmit your raw payment credentials. Disputes about a specific transaction may also be subject to PayMongo's own terms.</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">7. Your data</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">Your business's records (orders, pricing, inventory, messages) remain yours. Nifti's role is to host and process it on your behalf, not to claim ownership of it.</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">8. Disclaimer &amp; limitation of liability</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">Nifti is provided "as is" during this pilot, without warranty of uninterrupted or error-free operation. To the fullest extent permitted by law, Nifti's liability for any claim arising from your use of the platform is limited to the amount you've paid us in the preceding 3 months (or ₱0 if you're on a free/trial plan).</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">9. Termination</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">You can stop using Nifti and close your account at any time. We may suspend or terminate an account for a clear violation of section 5 (Acceptable use).</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">10. Governing law</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">These terms are governed by the laws of the Republic of the Philippines.</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">11. Changes</h2>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">We'll notify pilot users directly of any material change to these terms.</p>
+
+  <h2 style="font-size:20px;margin:22px 0 10px;">Contact</h2>
+  <p style="font-size:15.5px;line-height:1.7;">Questions about these terms: <strong>[your support email]</strong>.</p>
 </div></section>
 <footer><div class="wrap foot-inner">
   <div class="foot-brand"><strong>Nifti</strong></div>
@@ -3091,6 +3131,24 @@
   </div>
 </div>
 
+<!-- Sentry (github.com/getsentry/sentry-javascript) — a real error-monitoring dashboard with
+     alerting, on top of the bare client_error_log table below. Free tier: 5,000 errors/month, no
+     credit card. To activate: create a free project at https://sentry.io (Platform: Browser
+     JavaScript), copy its DSN from Settings → Client Keys (DSN), and paste it in place of the
+     placeholder below. Until then this silently no-ops — nothing else on the page depends on it. -->
+<script src="https://cdn.jsdelivr.net/npm/@sentry/browser@8/build/bundle.min.js" crossorigin="anonymous"></script>
+<script>
+const NIFTI_SENTRY_DSN = 'REPLACE_WITH_YOUR_SENTRY_DSN';
+if(window.Sentry && NIFTI_SENTRY_DSN.indexOf('REPLACE_WITH') === -1){
+  try{
+    Sentry.init({
+      dsn: NIFTI_SENTRY_DSN,
+      environment: (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'development' : 'production',
+      tracesSampleRate: 0, // errors only, no performance tracing — keeps usage well inside the free tier
+    });
+  }catch(e){ console.warn('Sentry init failed:', e); }
+}
+</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============ SUPABASE AUTH ============ */
@@ -3153,6 +3211,11 @@ async function loadMyBusinessContext(){
   myBusiness = tm.businesses;
   currentAppRole = myBusiness.type; // 'buyer' or 'supplier' — fixed by the account, not togglable
   currentUserId = tm.id;
+  // Tags Sentry's own automatically-captured errors with who hit them, instead of a manual
+  // Sentry.captureException call inside logClientError below — which would double-report every
+  // error (once from Sentry's own global handlers, once manually), burning through the free
+  // tier's monthly quota twice as fast for no extra signal.
+  if(window.Sentry) Sentry.setUser({ id: myBusiness.id, email: user.email, username: myBusiness.name });
   if(myBusiness.type === 'buyer') ME_BUYER = myBusiness.id; else ME_SUPPLIER = myBusiness.id;
   // approvalThreshold used to live in local storage only — never reached a teammate's own device,
   // so the spending-approval control was silently bypassed for anyone not on the device that set
