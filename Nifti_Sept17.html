@@ -3427,11 +3427,11 @@ async function loadRealPurchaseOrders(){
    actually changed at that call site (falling back to the whole dataset only for the dirty-flag
    retry path, where the exact set of pending changes isn't tracked) — every mutation site passes
    its own item(s), so a save never re-uploads a stale local copy of some OTHER item a teammate on
-   a different device may have just changed. These are also hooked into saveNiftiStateNow() (see
-   there) — the one function every single mutation site already reliably funnels through via
-   scheduleNiftiSave(), the debounce timer, the periodic autosave, or beforeunload — as a full-
-   dataset fallback for anything that reaches local storage without an explicit sync call. Deletes
-   are the one thing a bulk upsert can't detect on its own, so those are handled explicitly at
+   a different device may have just changed. There is NO catch-all fallback for this — unlike
+   scheduleNiftiSave()/saveNiftiStateNow() (local storage only, no Supabase call in that path at
+   all), a new inventory/supply mutation site MUST call one of these sync functions explicitly, or
+   the change never reaches the server. Deletes are the one thing a bulk upsert can't detect on its
+   own, so those are handled explicitly at
    their few call sites instead. */
 function mapInventoryJsToRow(item){
   // item.exp is a lossy SHORT DISPLAY string ("Aug 28", no year — see formatExpDisplay), not a
@@ -3447,6 +3447,7 @@ function mapInventoryJsToRow(item){
     days_left: item.daysLeft != null ? item.daysLeft : null, lead_time: item.leadTime != null ? item.leadTime : null,
     batches: item.batches || [], barcode: item.barcode || null, unit: item.unit || null, // batches is NOT NULL in the DB (defaults to '[]') — most SKUs don't track batches at all, so this must never write null
     meta: item._meta || null, rop_enabled: item.ropEnabled !== false, max_level_enabled: item.maxLevelEnabled !== false,
+    batch_tracking_enabled: item.batchTrackingEnabled === true,
   };
 }
 function mapInventoryRowToJs(row){
@@ -3466,6 +3467,7 @@ function mapInventoryRowToJs(row){
     batches: (row.batches && row.batches.length) ? row.batches : undefined,
     barcode: row.barcode || undefined, unit: row.unit || undefined,
     _meta: row.meta || undefined, ropEnabled: row.rop_enabled !== false, maxLevelEnabled: row.max_level_enabled !== false,
+    batchTrackingEnabled: row.batch_tracking_enabled === true,
   };
 }
 function mapSupplyJsToRow(item){
@@ -4879,13 +4881,19 @@ function renderSupplierInbox(){
   if(!el) return;
   if(document.getElementById('supplierPipelineBox')) renderSupplierDashboardWidgets();
   // Same fix as the buyer inbox: an item aimed at one specific teammate (forMemberId) only shows
-  // for that person now, instead of everyone on the team seeing everyone else's task pings.
-  if(supplierInbox.length === 0){
+  // for that person now, instead of everyone on the team seeing everyone else's task pings. The
+  // empty-state check has to use this SAME filtered list, not the raw array — supplierInbox items
+  // are never removed once resolved (they persist showing resolvedText), so the raw array is
+  // almost always non-empty, which left teammate B staring at a blank gap (empty .map() output)
+  // instead of the friendly "Nothing needs your attention" message whenever every current item
+  // happened to be targeted at a colleague.
+  const visible = supplierInbox.filter(i=>!i.forMemberId || i.forMemberId===currentUserId);
+  if(visible.length === 0){
     el.innerHTML = `<div style="text-align:center;color:var(--ink);padding:24px;font-size:15.5px;">Nothing needs your attention right now.</div>`;
     updateSupplierBadge();
     return;
   }
-  el.innerHTML = supplierInbox.filter(i=>!i.forMemberId || i.forMemberId===currentUserId).map((item) => {
+  el.innerHTML = visible.map((item) => {
     let actionsHtml;
     if(item.resolved){
       actionsHtml = `<span style="font-size:15px;font-weight:700;color:var(--green);">${item.resolvedText}</span>`;
@@ -5876,7 +5884,23 @@ function renderInvHiddenColumnsBar(){
 }
 function toggleInvFieldVisibility(code, field){
   const item = inventoryData.find(i=>i.code===code);
-  item[field] = item[field] === false ? true : false;
+  // ropEnabled/maxLevelEnabled default to ON — their absence reads as true elsewhere (`!== false`)
+  // — so the first toggle from unset correctly flips to explicit false. batchTrackingEnabled is
+  // the opposite: it defaults to OFF (`=== true` elsewhere), so using the same "flip to false on
+  // first click" logic for it left the very first click on a fresh item's switch doing nothing
+  // visible (item[field] went from undefined to explicit false — still off) — the user had to
+  // click a second, seemingly-redundant time to actually see it turn on.
+  const defaultsOn = field !== 'batchTrackingEnabled';
+  item[field] = defaultsOn ? (item[field] === false ? true : false) : (item[field] === true ? false : true);
+  // Turning batch tracking on with no batches yet left the On-hand field disabled and labeled
+  // "(from batches)" while actually still just showing the old manually-set number, frozen and
+  // now uneditable, until a first batch existed to derive it from. Seed one batch matching the
+  // current on-hand so that label is accurate the moment it appears, instead of a misleading
+  // in-between state.
+  if(field === 'batchTrackingEnabled' && item.batchTrackingEnabled === true && (!item.batches || !item.batches.length)){
+    item.batches = [{lot:'', qty: item.onHand || 0, exp: APP_TODAY || new Date().toISOString().slice(0,10)}];
+    syncBatchTotals(item);
+  }
   renderInventoryTable();
   syncInventoryToSupabase([item]);
 }
