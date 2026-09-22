@@ -3155,6 +3155,16 @@ async function loadMyBusinessContext(){
   // listings, which then also leaks into the price-agreement product picker (see
   // syncMyCatalogToBuyerReference, called unconditionally later in boot).
   myCatalog = [];
+  // Same problem again: standingPriceAgreements/supplierProductCatalogs ship with 2 fake demo
+  // agreements ("Portland Cement 40kg"/"Corrugated Boxes 24x24" against the literal string
+  // 'me_buyer') and a demo supplier's product list. These have no real Supabase backing at all —
+  // standingPriceAgreements is local-storage-only even for a real account — so unlike
+  // inventoryData/myCatalog above, a real account's own agreements (if any were saved locally on
+  // this device in a prior session) are restored right after this by applyNiftiPersistedState;
+  // this just strips the fake seed first so it doesn't leak into buildSkuMaster's unfiltered
+  // `standingPriceAgreements.forEach` (Data Quality panel) or the price-agreement product picker.
+  standingPriceAgreements = [];
+  supplierProductCatalogs = {};
   // Same problem again: savedBuyerAddresses ships seeded with the demo buyer's literal address
   // ('Dela Cruz Hardware, Marikina City'). Businesses has no address column to load a real one
   // from (same gap noted above for taxProfiles.registeredAddress), so a real buyer's very first
@@ -4017,6 +4027,12 @@ function applyRealAccountUI(){
   // every avatar upload/removal) reads this same field for fallback initials, so it would also
   // silently revert a real account's avatar initials back to "DC" the next time a photo changed.
   const settingsBizNameEl = document.getElementById('settingsBizName'); if(settingsBizNameEl) settingsBizNameEl.value = myBusiness.name;
+  // Settings > Account ships with a hardcoded demo login email baked into its HTML value. Left
+  // alone, a real account sees "delacruz.owner@gmail.com" as if it were their own login email —
+  // and saveLoginEmail() reads this same field verbatim and fires a real sb.auth.updateUser()
+  // email-change request against whatever's in it, so an accidental "Update" click without first
+  // editing the field would kick off a real change-of-login-email toward a demo address.
+  const settingsLoginEmailEl = document.getElementById('settingsLoginEmail'); if(settingsLoginEmailEl && myTeamMember && myTeamMember.email) settingsLoginEmailEl.value = myTeamMember.email;
   if(typeof messageEdited !== 'undefined') messageEdited = false;
   if(document.getElementById('chatPreview')) updatePreview();
   // "Preview either side's metrics" only makes sense for the demo, where one browser session
@@ -5097,6 +5113,16 @@ const ACTION_PERMISSIONS = {
   respondToPriceAgreement: ['Owner','General Manager','Purchasing Agent','Finance'],
   proposeTerms:            ['Owner','General Manager','Purchasing Agent'],
   manageSkuRisk:           ['Owner','General Manager','Purchasing Agent'], // SKU criticality tier + backup supplier
+  // A PO price counter-offer is the same category of binding price commitment as cancelOrder —
+  // was previously ungated, letting any role with Orders-page access (e.g. Warehouse Manager)
+  // accept or send one.
+  negotiatePoPrice:        ['Owner','General Manager','Purchasing Agent','Finance'],
+  // Propose/delete/reconfirm a standing price agreement — same commitment category as proposeTerms,
+  // was previously ungated (a Finance-only teammate could freely create or delete these).
+  managePriceAgreement:    ['Owner','General Manager','Purchasing Agent'],
+  // A supplier's own public product catalog and prices — was previously ungated, letting any role
+  // with Suppliers-page access edit prices or flip on public "Discover" listing.
+  manageCatalog:           ['Owner','General Manager','Purchasing Agent'],
   // Team & roles — Owner only for granting/creating roles; General Manager can view but not
   // change anyone's access, matching PRIVILEGED_ROLES' own description above (full visibility,
   // not the power to reassign anyone's role).
@@ -5454,10 +5480,14 @@ function syncBatchTotals(item){
     item.lot = null; item.exp = null;
   }
 }
+// Thresholds match every other status-setting site in the file (<=, 1.5x) — this one used to use
+// different operators (< and 1.4x), so the exact same onHand/rop pair could flip between Critical
+// and Warning depending purely on which code path last touched the item (e.g. Critical after a
+// manual Edit save, Warning after "Record stock going out").
 function updateInvStatusFromStock(item){
   if(item.ropEnabled===false) return;
-  if(item.onHand < item.rop) item.status = 'critical';
-  else if(item.onHand < item.rop*1.4) item.status = 'warning';
+  if(item.onHand <= item.rop) item.status = 'critical';
+  else if(item.onHand <= item.rop*1.5) item.status = 'warning';
   else item.status = 'healthy';
 }
 function renderBatchSection(item){
@@ -5758,6 +5788,10 @@ function invSubmitReorder(code){
 function toggleRopTracking(code){
   const item = inventoryData.find(i=>i.code===code);
   item.ropEnabled = item.ropEnabled === false ? true : false;
+  // updateInvStatusFromStock no-ops while tracking is off, so status can be arbitrarily stale by
+  // the time it's re-enabled — recompute it now against the item's CURRENT onHand/rop instead of
+  // showing whatever was cached from before tracking was turned off.
+  if(item.ropEnabled) updateInvStatusFromStock(item);
   renderInventoryTable();
   syncInventoryToSupabase();
 }
@@ -5812,10 +5846,17 @@ function renderEditBatchSection(item){
     <span class="row-action" onclick="addEditBatchRow('${item.code}')">+ Add a batch</span>
   </div>`;
 }
+// syncBatchTotals + updateInvStatusFromStock after every batch edit here, not just
+// submitConsume/submitReceive — without these, item.onHand (and the top-line stock count/status
+// pill) silently drifts away from what the batches themselves actually sum to. That drift used to
+// stay invisible until the NEXT consume/receive action suddenly "corrected" onHand by a phantom
+// amount with no explanation for where it went.
 function addEditBatchRow(code){
   const item = inventoryData.find(i=>i.code===code);
   if(!item.batches) item.batches = [];
   item.batches.push({lot:'', qty:0, exp:APP_TODAY || new Date().toISOString().slice(0,10)});
+  syncBatchTotals(item);
+  updateInvStatusFromStock(item);
   invExpandedCode = code; invExpandedMode = 'edit';
   renderInventoryTable();
   syncInventoryToSupabase();
@@ -5824,12 +5865,17 @@ function updateEditBatch(code, idx, field, value){
   const item = inventoryData.find(i=>i.code===code);
   if(!item.batches || !item.batches[idx]) return;
   item.batches[idx][field] = field==='qty' ? (parseInt(value)||0) : value;
+  syncBatchTotals(item);
+  updateInvStatusFromStock(item);
+  renderInventoryTable();
   syncInventoryToSupabase();
 }
 function removeEditBatch(code, idx){
   const item = inventoryData.find(i=>i.code===code);
   if(!item.batches) return;
   item.batches.splice(idx,1);
+  syncBatchTotals(item);
+  updateInvStatusFromStock(item);
   invExpandedCode = code; invExpandedMode = 'edit';
   renderInventoryTable();
   syncInventoryToSupabase();
@@ -5885,7 +5931,11 @@ function invSaveEdit(code){
   if(maxRaw !== '' && (isNaN(maxNum) || maxNum < 0)){ showToast('Please enter a valid max level (0 or more).'); return; }
   const before = {onHand:item.onHand, rop:item.rop, maxLevel:item.maxLevel, warehouse:item.warehouse};
   item.name = document.getElementById('editName_'+code).value;
-  item.onHand = onHandRaw !== '' ? onHandNum : item.onHand;
+  // When batch tracking is on, the On hand field is disabled and derived from the batches
+  // themselves (see renderEditBatchSection/syncBatchTotals) — applying the raw input here would
+  // silently desync onHand from what the batches actually sum to.
+  if(item.batchTrackingEnabled === true){ if(item.batches) syncBatchTotals(item); }
+  else item.onHand = onHandRaw !== '' ? onHandNum : item.onHand;
   item.warehouse = document.getElementById('editWarehouse_'+code).value || '';
   item.rop = ropRaw !== '' ? ropNum : item.rop;
   item.maxLevel = maxRaw !== '' ? maxNum : (item.rop*3);
@@ -6400,6 +6450,7 @@ function applyRestockSuggestion(code, suggestedRop){
   if(!item) return;
   const oldRop = item.rop;
   item.rop = suggestedRop;
+  updateInvStatusFromStock(item); // the new rop can put the item's existing onHand into a different status band
   logAudit('manual_override', 'inventoryItem', code, 'rop', oldRop, suggestedRop, 'Applied a restock-level suggestion based on order history');
   renderInventoryTable();
   renderRestockSuggestionsPanel();
@@ -6541,8 +6592,8 @@ function renderInventoryTable(){
           ${batchOnEdit ? renderEditBatchSection(item) : ''}
           <div class="expand-grid">
             <div class="expand-field"><label>SKU name</label><input type="text" id="editName_${item.code}" value="${item.name}"></div>
-            <div class="expand-field"><label>On hand quantity</label><input type="number" id="editOnHand_${item.code}" value="${item.onHand}">
-              <div style="font-size:15px;line-height:1.5;color:var(--ink);margin-top:4px;">The actual physical count you have right now in this warehouse.</div></div>
+            <div class="expand-field" style="${batchOnEdit?'opacity:.5;':''}"><label>On hand quantity ${batchOnEdit?'(from batches)':''}</label><input type="number" id="editOnHand_${item.code}" value="${item.onHand}" ${batchOnEdit?'disabled':''}>
+              <div style="font-size:15px;line-height:1.5;color:var(--ink);margin-top:4px;">${batchOnEdit ? 'Batch tracking is on — this total comes from the batches below, not a number you set here.' : 'The actual physical count you have right now in this warehouse.'}</div></div>
             <div class="expand-field"><label>Reason for the quantity change (if any)</label><select id="editOnHandReason_${item.code}">${STOCK_ADJUSTMENT_REASONS.map(r=>`<option value="${r.code}">${r.label}</option>`).join('')}</select></div>
             <div class="expand-field">
               <label>Warehouse</label>
@@ -7916,6 +7967,7 @@ function renderPriceAgreements(partyId, isSupplierRole){
   </div>`;
 }
 function reconfirmAgreementPrice(id){
+  if(!requirePermission('managePriceAgreement')) return;
   const a = standingPriceAgreements.find(x=>x.id===id);
   if(!a) return;
   a.effectiveDate = APP_TODAY;
@@ -7958,6 +8010,7 @@ function fillAgreementUnit(partyId){
   if(match && !unitEl.value) unitEl.value = match.unit;
 }
 function saveAgreement(partyId){
+  if(!requirePermission('managePriceAgreement')) return;
   const isSupplierRole = currentAppRole === 'supplier';
   const supplierId = isSupplierRole ? ME_SUPPLIER : partyId;
   const buyerId = isSupplierRole ? partyId : ME_BUYER;
@@ -8002,6 +8055,7 @@ function saveAgreement(partyId){
   commitAgreement(partyId);
 }
 function commitAgreement(partyId){
+  if(!requirePermission('managePriceAgreement')) return;
   const isSupplierRole = currentAppRole === 'supplier';
   const supplierId = isSupplierRole ? ME_SUPPLIER : partyId;
   const buyerId = isSupplierRole ? partyId : ME_BUYER;
@@ -8043,6 +8097,7 @@ function openDeleteAgreementForm(id, partyId){
   </div>`;
 }
 function confirmDeleteAgreement(id, partyId){
+  if(!requirePermission('managePriceAgreement')) return;
   const reasonEl = document.getElementById('deleteAgreementReason_'+id);
   const reason = reasonEl ? reasonEl.value.trim() : '';
   const idx = standingPriceAgreements.findIndex(a=>a.id===id);
@@ -10318,8 +10373,7 @@ function submitDeliveryReceiptSignature(id){
   po.deliveryConfirmation.capturedBy = po.deliveryConfirmation.capturedBy || currentAppRole;
   if(po.status==='shipped' || po.status==='in_customs'){ po.status = 'delivered'; po.atRisk = false; po.riskNote = ''; }
   poLogHistory(po, currentAppRole, 'Delivery receipt signed — received by '+name);
-  applyDeliveryToInventory(po, null);
-  applyDeliveryToSupplierStock(po, null);
+  applyDeliveryStockChangesOnce(po, null);
   renderOrdersTable();
   if(document.getElementById('supplierOrderRows')) renderSupplierOrdersTable();
   refreshOrderModalIfOpen(po.id);
@@ -10839,6 +10893,7 @@ function releaseDraftLock(id){
   renderOrdersTable();
 }
 function acceptCounter(id, side){
+  if(!requirePermission('negotiatePoPrice')) return;
   const po = getPO(id);
   snapshotPO(po);
   po._undoLabel = 'Counter-offer accepted at '+fmtPHP(po.counter.unitPrice)+'/unit.';
@@ -10851,6 +10906,7 @@ function acceptCounter(id, side){
   refreshOrderModalIfOpen(po.id);
 }
 function rejectCounter(id, side){
+  if(!requirePermission('negotiatePoPrice')) return;
   const po = getPO(id);
   snapshotPO(po);
   const originalPrice = po.lineItems[0].unitPrice;
@@ -10886,6 +10942,7 @@ function openNegotiateForm(id, side){
   </div>`;
 }
 function submitNegotiate(id, side){
+  if(!requirePermission('negotiatePoPrice')) return;
   const po = getPO(id);
   const price = Number(document.getElementById('negotiatePrice_'+id).value);
   const note = document.getElementById('negotiateNote_'+id).value;
@@ -11035,6 +11092,21 @@ function applyDeliveryToInventory(po, receivedQuantities){
   if(document.getElementById('inventoryTheadRow')) renderInventoryTable();
   syncInventoryToSupabase();
 }
+// Three separate flows can each end up recording "this order was delivered" — the buyer's own
+// confirmation, the supplier's point-of-delivery signature capture, and signing a Delivery
+// Receipt after the fact (which can run even when one of the other two already happened, e.g. a
+// buyer confirms with no signature, then later opens "Generate Delivery Receipt" and signs it).
+// Each of those used to call applyDeliveryToInventory/applyDeliveryToSupplierStock unconditionally
+// — so signing a DR after an already-confirmed delivery silently added/removed the FULL ordered
+// quantity a second time, on top of whatever the first confirmation (possibly a partial one)
+// already applied. stockApplied lives on deliveryConfirmation itself (not a separate PO field) so
+// it's already covered by the existing delivery_confirmation sync column — no schema change needed.
+function applyDeliveryStockChangesOnce(po, receivedQuantities){
+  if(po.deliveryConfirmation && po.deliveryConfirmation.stockApplied) return;
+  applyDeliveryToInventory(po, receivedQuantities);
+  applyDeliveryToSupplierStock(po, receivedQuantities);
+  if(po.deliveryConfirmation) po.deliveryConfirmation.stockApplied = true;
+}
 function submitDeliveryConfirm(id){
   const po = getPO(id);
   const choice = document.querySelector(`input[name="dcMatch_${id}"]:checked`).value; // 'yes' | 'partial' | 'damaged' | 'no'
@@ -11078,8 +11150,7 @@ function submitDeliveryConfirm(id){
     // Inventory's on-hand count for you, by matching each line item to an existing product by
     // name. Without this, "on hand" is just a number someone has to remember to retype by hand
     // every single time stock arrives — which is exactly what makes manual inventory unreliable.
-    applyDeliveryToInventory(po, receivedQuantities);
-    applyDeliveryToSupplierStock(po, receivedQuantities);
+    applyDeliveryStockChangesOnce(po, receivedQuantities);
     let logMsg;
     if(damaged){
       const rejectedSummary = damagedLines.filter(d=>d.damagedQty>0).map(d=>`${d.product}: ${d.damagedQty} rejected`).join(', ');
@@ -11212,8 +11283,7 @@ function submitSupplierDeliveryConfirm(id){
     }
     // Same bilateral-truth update the buyer's own confirmation triggers — the goods really did
     // arrive regardless of which side recorded it, so both ledgers move together, not just one.
-    applyDeliveryToInventory(po, null);
-    applyDeliveryToSupplierStock(po, null);
+    applyDeliveryStockChangesOnce(po, null);
     poLogHistory(po, 'supplier', 'Delivery confirmed — received by '+name+' (signature captured)'+(proofUrl ? ' — photo attached' : '')+codMsg);
     if(po.buyerId===ME_BUYER) pushBuyerInboxItem({title:'Delivered — '+po.poNumber, meta:'Received by '+name+codMsg, pillLabel:'Delivered', pillClass:'pill-ok', poId:po.id});
     pushNotification(`Delivery confirmed — ${po.poNumber}`, 'var(--green)', {type:'order', poId:po.id}, 'orderDelivered', PUSH_TEMPLATES.orderDelivered({buyerName:po.buyerName, poNumber:po.poNumber, discrepancy:false}));
@@ -11439,6 +11509,7 @@ function submitRecordPayment(id){
 // same as it would at a real bank. Bouncing removes it from the balance entirely and reopens
 // the invoice, rather than silently leaving it counted.
 function markCheckCleared(id, idx){
+  if(!requirePermission('markInvoicePaid')) return;
   const po = getPO(id);
   const p = po.invoice.payments && po.invoice.payments[idx];
   if(!p || p.method!=='check') return;
@@ -11458,6 +11529,7 @@ function markCheckCleared(id, idx){
   scheduleNiftiSave();
 }
 function markCheckBounced(id, idx){
+  if(!requirePermission('markInvoicePaid')) return;
   const po = getPO(id);
   const p = po.invoice.payments && po.invoice.payments[idx];
   if(!p || p.method!=='check') return;
@@ -11504,6 +11576,14 @@ function startCreatePOFromTemplate(){
   if(select && select.focus) select.focus();
 }
 function openCreatePOModal(existingId){
+  // A brand-new real buyer with zero connected suppliers has no supplier to default the form to —
+  // suppliersData[0] below would throw. This is exactly the empty-state CTA a new signup hits
+  // first, so fail here with a real message instead of a silent crash.
+  if(!existingId && !suppliersData.length){
+    showToast('Invite a supplier first — you need at least one connected supplier before creating a purchase order.', 'error');
+    navigate('invite');
+    return;
+  }
   editingPOId = existingId || null;
   resetPriceConfirmButton();
   const existing = existingId ? getPO(existingId) : null;
@@ -12184,6 +12264,7 @@ function openCounterForm(id){
   </div>`;
 }
 function submitCounter(id){
+  if(!requirePermission('negotiatePoPrice')) return;
   const po = getPO(id);
   const price = Number(document.getElementById('counterPrice_'+id).value);
   const note = document.getElementById('counterNote_'+id).value;
@@ -13999,6 +14080,7 @@ function saveCatalogPhoto(i, dataUrl){
   scheduleNiftiSave();
 }
 function toggleMyCatalogPublic(){
+  if(!requirePermission('manageCatalog')) return;
   myCatalogPublic = !myCatalogPublic;
   renderMyCatalogPanel();
   if(document.getElementById('discoveryLeadsContent')) renderDiscoveryLeadsPanel();
@@ -14100,6 +14182,7 @@ function toggleMyCatalogAddForm(){
   if(!el.classList.contains('hidden')) document.getElementById('myCatalogProduct').focus();
 }
 function addMyCatalogItem(){
+  if(!requirePermission('manageCatalog')) return;
   const product = document.getElementById('myCatalogProduct').value;
   const price = Number(document.getElementById('myCatalogPrice').value);
   const unit = document.getElementById('myCatalogUnit').value.trim();
@@ -14143,6 +14226,7 @@ function openEditMyCatalogItemForm(i){
   </td></tr>`;
 }
 function saveMyCatalogItemEdit(i){
+  if(!requirePermission('manageCatalog')) return;
   const product = document.getElementById('myCatEditProduct_'+i).value.trim();
   const price = Number(document.getElementById('myCatEditPrice_'+i).value);
   const unit = document.getElementById('myCatEditUnit_'+i).value.trim();
@@ -14167,6 +14251,7 @@ function removeMyCatalogItem(i){
   </div>`;
 }
 function confirmRemoveMyCatalogItem(i){
+  if(!requirePermission('manageCatalog')) return;
   const removed = myCatalog[i];
   myCatalog.splice(i,1);
   // If the supplier no longer carries it, stop suggesting it for new orders too.
@@ -15346,6 +15431,12 @@ function sliceForRange(range, seriesArr){
   if(range==='monthly'){
     return { labels: monthLabelsFull.slice(-12), series: seriesArr.map(s=>({...s, data:s.data.slice(-12)})) };
   }
+  // 'price' (buyer) and 'ontime' (supplier) are rates/point-in-time values — averaging 3 or 12
+  // monthly values into one is correct for those. Every other metric here (volume, spend,
+  // revenue, orders) is additive — averaging understated a quarter's total by ~3x and a year's by
+  // ~12x. Matches the fix already applied to sliceRealForRange (its real-account equivalent),
+  // which is unconditionally additive because its only caller only ever passes additive metrics.
+  const isRate = currentMetric === 'price' || currentMetric === 'ontime';
   if(range==='quarterly'){
     const labels24 = monthLabelsFull.slice(-24);
     const dataSlices = seriesArr.map(s=>s.data.slice(-24));
@@ -15354,7 +15445,8 @@ function sliceForRange(range, seriesArr){
       newLabels.push('Q'+(Math.floor(i/3)+1));
       dataSlices.forEach((arr,si)=>{
         const chunk = arr.slice(i,i+3);
-        newSeries[si].data.push(Math.round(chunk.reduce((a,b)=>a+b,0)/chunk.length));
+        const total = chunk.reduce((a,b)=>a+b,0);
+        newSeries[si].data.push(Math.round(isRate ? total/chunk.length : total));
       });
     }
     return { labels:newLabels, series:newSeries };
@@ -15365,7 +15457,8 @@ function sliceForRange(range, seriesArr){
       newLabels.push("'"+String(monthMeta[i+11].y).slice(2));
       seriesArr.forEach((s,si)=>{
         const chunk = s.data.slice(i,i+12);
-        newSeries[si].data.push(Math.round(chunk.reduce((a,b)=>a+b,0)/chunk.length));
+        const total = chunk.reduce((a,b)=>a+b,0);
+        newSeries[si].data.push(Math.round(isRate ? total/chunk.length : total));
       });
     }
     return { labels:newLabels, series:newSeries };
@@ -18175,6 +18268,7 @@ function commitInventoryImport(){
       item.warehouse = r.warehouse;
       if(r.rop!=null) item.rop = r.rop;
       if(r.maxLevel!=null) item.maxLevel = r.maxLevel;
+      updateInvStatusFromStock(item); // a re-import can legitimately move stock/rop into a different status band — don't leave the old cached status showing
       item._meta = createMeta('CSV import: '+s.filename, CONFIDENCE.NEEDS_REVIEW, {sourceTimestamp:APP_TODAY, importedAt:APP_TODAY, lastVerifiedAt:APP_TODAY});
       item._importBatchId = batchId;
     } else {
@@ -18222,7 +18316,7 @@ function undoImportBatch(batchId){
   inventoryData = inventoryData.filter(i => !batch.addedCodes.includes(i.code));
   batch.updatedSnapshots.forEach(snap => {
     const item = inventoryData.find(i=>i.code===snap.code);
-    if(item) Object.assign(item, snap.before);
+    if(item){ Object.assign(item, snap.before); updateInvStatusFromStock(item); } // the snapshot has no status field — recompute against the restored onHand/rop
   });
   batch.rolledBack = true;
   logAudit('csv_import_rollback', 'inventory', batchId, 'rolledBack', false, true);
