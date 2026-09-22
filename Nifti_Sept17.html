@@ -3153,6 +3153,15 @@ async function loadMyBusinessContext(){
   // silently ship with this fake demo address until they happened to type a real one manually via
   // the Create PO form. Cleared here so it falls back to an honest blank instead.
   savedBuyerAddresses = [];
+  // Same problem, worst instance yet: inventoryData/supplyData ship with 6-7 fully fake SKUs
+  // ("Galvanized Wire 12ga", "Portland Cement 40kg", real-looking on-hand/reorder-point numbers)
+  // and whLabel ships with 3 fake warehouse names — a real account's Inventory page would show
+  // these as if they were the business's own real stock the instant it loaded, before
+  // loadRealInventory()/loadRealSupply()/loadRealWarehouses() (called later in bootNifti) ever
+  // got a chance to load the real thing. Cleared here as a safe default first: if that later load
+  // ever fails (network error, RLS issue), the result is an honest "no items yet" instead of
+  // silently wrong fake stock.
+  inventoryData = []; supplyData.length = 0; Object.keys(whLabel).forEach(k=>delete whLabel[k]);
   await loadMyTeamRoster();
   await loadMyCustomRoles();
   return true;
@@ -3223,6 +3232,26 @@ function subscribeToTeamAndRoles(){
 
 function newPoId(){
   return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'po_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+}
+// Shared by inventory items, supply items, and warehouse/location records — each needs a real,
+// stable id (not the human-facing SKU code or warehouse key) the moment it's created, so it can be
+// upserted to its Supabase table by primary key from then on, same reasoning as newPoId/newMessageId.
+function newRecordId(){
+  return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'rec_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+}
+// inventory_items/supply_items both have a real UNIQUE(business_id, sku_code) constraint in
+// Supabase — but the random code generators at every "add new item"/CSV-import call site never
+// checked for a collision against this business's OWN existing codes first (only ~9000 possible
+// 4-digit suffixes for inventory, ~900 for supply). A single colliding code doesn't just fail that
+// one row — a bulk upsert() call fails ENTIRELY on any constraint violation, which would have
+// silently broken syncing for this business's WHOLE inventory, forever (inventorySyncDirty would
+// stay stuck true, retried on every reconnect, failing every single time, since nothing about the
+// collision ever resolves itself). Retrying with a fresh random code until it's actually unique
+// against this business's current dataset closes that off at the source.
+function generateUniqueSkuCode(prefix, dataset, min, range){
+  let code;
+  do{ code = prefix+(min+Math.floor(Math.random()*range)); }while(dataset.some(i=>i.code===code));
+  return code;
 }
 
 // Small cache so a Realtime event (which carries only the raw row, no join) doesn't need a
@@ -3341,6 +3370,229 @@ async function loadRealPurchaseOrders(){
   purchaseOrders.push(...merged);
 }
 
+/* ============ REAL INVENTORY/SUPPLY SYNC (Supabase-backed inventory_items/supply_items/locations) ============
+   Same shape-preserving approach as the PO sync above: inventoryData/supplyData keep exactly the
+   shape every existing inventory function already reads/writes (item.code/onHand/rop/... — see
+   confirmAddInventoryItem, invSaveEdit, applyStockAdjustment, etc.), just with real Supabase rows
+   behind them for a signed-in account instead of the fixed demo seed. Unlike purchase_orders (one
+   row per real business action, upserted individually at the point of that action),
+   inventory/supply mutation happens at ~20 different call sites across quick edits, batch
+   stocktakes, CSV import, and PO-driven stock changes — rather than hunt down every one of them
+   individually (exactly the kind of miss that caused repeated bugs elsewhere in this file),
+   syncInventoryToSupabase()/syncSupplyToSupabase() do a full bulk upsert of the whole array, and
+   are hooked into saveNiftiStateNow() (see there) — the one function every single mutation site
+   already reliably funnels through via scheduleNiftiSave(), the debounce timer, the periodic
+   autosave, or beforeunload. A handful of the most-used single-item paths also call the sync
+   function directly for faster feedback, but that's a responsiveness nicety, not what guarantees
+   correctness. Deletes are the one thing a bulk upsert can't detect on its own, so those are
+   handled explicitly at their few call sites instead. */
+function mapInventoryJsToRow(item){
+  // item.exp is a lossy SHORT DISPLAY string ("Aug 28", no year — see formatExpDisplay), not a
+  // real date; the actual ISO expiry lives on the soonest batch (item.batches is kept sorted
+  // soonest-first by syncBatchTotals). Writing item.exp itself into a real `date` column would
+  // both be invalid and silently drop the year.
+  const soonestBatchExp = (item.batches && item.batches.length) ? item.batches[0].exp : null;
+  return {
+    id: item.id, business_id: myBusiness.id, sku_code: item.code, name: item.name,
+    warehouse: item.warehouse || null, on_hand: item.onHand, rop: item.rop, max_level: item.maxLevel,
+    lot: item.lot || null, exp: soonestBatchExp, status: item.status || null,
+    supplier_name: item.supplier || null,
+    days_left: item.daysLeft != null ? item.daysLeft : null, lead_time: item.leadTime != null ? item.leadTime : null,
+    batches: item.batches || [], barcode: item.barcode || null, unit: item.unit || null, // batches is NOT NULL in the DB (defaults to '[]') — most SKUs don't track batches at all, so this must never write null
+    meta: item._meta || null, rop_enabled: item.ropEnabled !== false, max_level_enabled: item.maxLevelEnabled !== false,
+  };
+}
+function mapInventoryRowToJs(row){
+  return {
+    id: row.id, code: row.sku_code, name: row.name, warehouse: row.warehouse || '',
+    onHand: Number(row.on_hand), rop: Number(row.rop), maxLevel: Number(row.max_level),
+    lot: row.lot || null, exp: row.exp ? formatExpDisplay(row.exp) : null, status: row.status || 'healthy',
+    supplier: row.supplier_name || 'Not set',
+    daysLeft: row.days_left != null ? row.days_left : null, leadTime: row.lead_time != null ? row.lead_time : null,
+    // An empty array is truthy in JS — syncBatchTotals/renderBatchSection both guard on
+    // `if(!item.batches)`, which a bare `row.batches || undefined` would never satisfy for an
+    // item that has no batches (the DB column defaults to '[]', not null). That would show a
+    // "Batches" section (with Record-stock-out/Receive-new-stock buttons) on every non-perishable
+    // item, and if either were ever used on one, syncBatchTotals would set onHand to 0 — reducing
+    // an empty batches array. Converting an empty array back to undefined here restores the
+    // original convention: batches is either absent (a plain-onHand item) or has real entries.
+    batches: (row.batches && row.batches.length) ? row.batches : undefined,
+    barcode: row.barcode || undefined, unit: row.unit || undefined,
+    _meta: row.meta || undefined, ropEnabled: row.rop_enabled !== false, maxLevelEnabled: row.max_level_enabled !== false,
+  };
+}
+function mapSupplyJsToRow(item){
+  return {
+    id: item.id, business_id: myBusiness.id, sku_code: item.code, name: item.name,
+    location: item.location || null, on_hand: item.onHand, committed: item.committed,
+    restock_level: item.restockLevel, barcode: item.barcode || null, meta: item._meta || null,
+  };
+}
+function mapSupplyRowToJs(row){
+  return {
+    id: row.id, code: row.sku_code, name: row.name, location: row.location || '',
+    onHand: Number(row.on_hand), committed: Number(row.committed), restockLevel: Number(row.restock_level),
+    barcode: row.barcode || undefined, _meta: row.meta || undefined,
+  };
+}
+// Every item needs a real id before it can be upserted — newRecordId() is assigned at creation
+// for anything added through this session, but this is a defensive backstop for any item that
+// somehow reached this point without one.
+function ensureRecordIds(dataset){
+  let changed = false;
+  dataset.forEach(item => { if(!item.id){ item.id = newRecordId(); changed = true; } });
+  return changed;
+}
+// inventorySyncDirty/supplySyncDirty/warehousesSyncDirty are the load-bearing safety net for the
+// single worst failure mode this sync layer could have: a real account's stock counts (or
+// warehouse names) get edited, the sync to Supabase fails or never gets a chance (offline, a
+// dropped request), and the NEXT load silently overwrites those real edits with older server
+// data — the user would see their own just-entered numbers vanish with zero explanation, exactly
+// the kind of thing that makes someone give up on a new system and go back to a notebook. These
+// three flags are persisted (see collectNiftiPersistableState) specifically so that guarantee
+// survives a reload/crash, not just the current tab session — see loadRealInventory/
+// loadRealSupply/loadRealWarehouses and retryPendingInventorySync below for how they're used.
+let inventorySyncDirty = false, supplySyncDirty = false, warehousesSyncDirty = false;
+async function syncInventoryToSupabase(){
+  if(!myBusiness || !inventoryData.length) return;
+  ensureRecordIds(inventoryData);
+  if(isOffline){ inventorySyncDirty = true; scheduleNiftiSave(); return; }
+  try{
+    const { error } = await sb.from('inventory_items').upsert(inventoryData.map(mapInventoryJsToRow));
+    if(error){ console.warn('Inventory sync failed:', error.message); inventorySyncDirty = true; scheduleNiftiSave(); return; }
+    inventorySyncDirty = false; scheduleNiftiSave();
+  }catch(e){ console.warn('Inventory sync failed:', e); inventorySyncDirty = true; scheduleNiftiSave(); }
+}
+async function syncSupplyToSupabase(){
+  if(!myBusiness || !supplyData.length) return;
+  ensureRecordIds(supplyData);
+  if(isOffline){ supplySyncDirty = true; scheduleNiftiSave(); return; }
+  try{
+    const { error } = await sb.from('supply_items').upsert(supplyData.map(mapSupplyJsToRow));
+    if(error){ console.warn('Supply sync failed:', error.message); supplySyncDirty = true; scheduleNiftiSave(); return; }
+    supplySyncDirty = false; scheduleNiftiSave();
+  }catch(e){ console.warn('Supply sync failed:', e); supplySyncDirty = true; scheduleNiftiSave(); }
+}
+// Warehouses sync as one bulk upsert too (not one call per warehouse) so the SAME dirty-flag/
+// retry story covers them — addWarehouse/addWarehouseFromEdit call this instead of syncing just
+// the one warehouse they just added, keeping "did everything reach the server" a single yes/no
+// per dataset instead of tracking it warehouse-by-warehouse.
+async function syncWarehousesToSupabase(){
+  if(!myBusiness || myBusiness.type !== 'buyer') return; // supplyLocationLabel has no real rows to sync — see loadRealWarehouses
+  const rows = Object.keys(whLabel).map(code => ({ business_id: myBusiness.id, code, label: whLabel[code] }));
+  if(!rows.length) return;
+  if(isOffline){ warehousesSyncDirty = true; scheduleNiftiSave(); return; }
+  try{
+    const { error } = await sb.from('locations').upsert(rows, { onConflict: 'business_id,code' });
+    if(error){ console.warn('Warehouse sync failed:', error.message); warehousesSyncDirty = true; scheduleNiftiSave(); return; }
+    warehousesSyncDirty = false; scheduleNiftiSave();
+  }catch(e){ console.warn('Warehouse sync failed:', e); warehousesSyncDirty = true; scheduleNiftiSave(); }
+}
+// Reconnect handling, same idea as retryPendingMessages/retryPendingPOs: actually re-pushes
+// whatever didn't make it, instead of just assuming everything is fine once the network is back.
+async function retryPendingInventorySync(){
+  if(!myBusiness || isOffline) return;
+  if(inventorySyncDirty) await syncInventoryToSupabase();
+  if(supplySyncDirty) await syncSupplyToSupabase();
+  if(warehousesSyncDirty) await syncWarehousesToSupabase();
+}
+async function deleteInventoryItemFromSupabase(id){
+  if(!myBusiness || !id) return;
+  const { error } = await sb.from('inventory_items').delete().eq('id', id).eq('business_id', myBusiness.id);
+  if(error) console.warn('Inventory item delete failed:', error.message);
+}
+async function deleteSupplyItemFromSupabase(id){
+  if(!myBusiness || !id) return;
+  const { error } = await sb.from('supply_items').delete().eq('id', id).eq('business_id', myBusiness.id);
+  if(error) console.warn('Supply item delete failed:', error.message);
+}
+async function deleteLocationFromSupabase(code){
+  if(!myBusiness) return;
+  const { error } = await sb.from('locations').delete().eq('business_id', myBusiness.id).eq('code', code);
+  if(error) console.warn('Warehouse delete failed for', code, '—', error.message);
+}
+async function loadRealInventory(){
+  if(!myBusiness) return;
+  // If a sync attempt already failed or never got a chance this session (inventorySyncDirty —
+  // restored from the last save, see applyNiftiPersistedState), the LOCAL array is ahead of
+  // whatever the server has. Fetching and replacing here would throw away real, unsent stock
+  // edits — so instead of loading, push the local state up first.
+  if(inventorySyncDirty){ syncInventoryToSupabase(); return; }
+  const { data, error } = await sb.from('inventory_items').select('*').eq('business_id', myBusiness.id);
+  if(error){ console.warn('Could not load inventory:', error.message); return; }
+  inventoryData = (data||[]).map(mapInventoryRowToJs);
+}
+async function loadRealSupply(){
+  if(!myBusiness) return;
+  if(supplySyncDirty){ syncSupplyToSupabase(); return; } // see loadRealInventory for why
+  const { data, error } = await sb.from('supply_items').select('*').eq('business_id', myBusiness.id);
+  if(error){ console.warn('Could not load supply items:', error.message); return; }
+  supplyData.length = 0;
+  supplyData.push(...(data||[]).map(mapSupplyRowToJs));
+}
+async function loadRealWarehouses(){
+  if(!myBusiness || myBusiness.type !== 'buyer') return; // supplyLocationLabel has no real rows to load — see syncWarehousesToSupabase
+  if(warehousesSyncDirty){ syncWarehousesToSupabase(); return; } // see loadRealInventory for why
+  const { data, error } = await sb.from('locations').select('*').eq('business_id', myBusiness.id);
+  if(error){ console.warn('Could not load warehouses:', error.message); return; }
+  Object.keys(whLabel).forEach(k => delete whLabel[k]);
+  (data||[]).forEach(row => { whLabel[row.code] = row.label; });
+  // A brand-new real account has zero warehouses — left empty, "Add Inventory Item"'s Warehouse
+  // dropdown (built from Object.keys(whLabel)) would render with no options at all, making it
+  // impossible to cleanly add a first product. One sensible default, seeded once, means there's
+  // always somewhere for a product to belong; anyone with more than one location can rename it or
+  // add more from Manage Warehouses exactly as before.
+  if(!Object.keys(whLabel).length){
+    const id = 'wh'+(whIdCounter++);
+    whLabel[id] = 'Main Warehouse';
+    syncWarehousesToSupabase();
+  }
+}
+let inventoryRealtimeChannel = null, supplyRealtimeChannel = null, locationsRealtimeChannel = null;
+function subscribeToInventory(){
+  if(!myBusiness) return;
+  if(inventoryRealtimeChannel) sb.removeChannel(inventoryRealtimeChannel);
+  inventoryRealtimeChannel = sb.channel('inventory-changes-'+myBusiness.id)
+    .on('postgres_changes', {event:'*', schema:'public', table:'inventory_items', filter:`business_id=eq.${myBusiness.id}`}, (payload) => {
+      const row = payload.new && payload.new.id ? payload.new : payload.old;
+      if(!row || !row.id) return;
+      const idx = inventoryData.findIndex(i=>i.id===row.id);
+      if(payload.eventType === 'DELETE'){ if(idx>-1) inventoryData.splice(idx,1); }
+      else { const mapped = mapInventoryRowToJs(payload.new); if(idx>-1) inventoryData[idx] = mapped; else inventoryData.push(mapped); }
+      renderInventoryTable(); // self-guards on invTableBody not being in the DOM
+      updateInventoryNavBadge();
+    })
+    .subscribe();
+}
+function subscribeToSupply(){
+  if(!myBusiness) return;
+  if(supplyRealtimeChannel) sb.removeChannel(supplyRealtimeChannel);
+  supplyRealtimeChannel = sb.channel('supply-changes-'+myBusiness.id)
+    .on('postgres_changes', {event:'*', schema:'public', table:'supply_items', filter:`business_id=eq.${myBusiness.id}`}, (payload) => {
+      const row = payload.new && payload.new.id ? payload.new : payload.old;
+      if(!row || !row.id) return;
+      const idx = supplyData.findIndex(i=>i.id===row.id);
+      if(payload.eventType === 'DELETE'){ if(idx>-1) supplyData.splice(idx,1); }
+      else { const mapped = mapSupplyRowToJs(payload.new); if(idx>-1) supplyData[idx] = mapped; else supplyData.push(mapped); }
+      renderSupplyTable(); // self-guards on supplyTableBody not being in the DOM
+    })
+    .subscribe();
+}
+function subscribeToLocations(){
+  if(!myBusiness || myBusiness.type !== 'buyer') return;
+  if(locationsRealtimeChannel) sb.removeChannel(locationsRealtimeChannel);
+  locationsRealtimeChannel = sb.channel('locations-changes-'+myBusiness.id)
+    .on('postgres_changes', {event:'*', schema:'public', table:'locations', filter:`business_id=eq.${myBusiness.id}`}, (payload) => {
+      if(payload.eventType === 'DELETE'){ if(payload.old && payload.old.code) delete whLabel[payload.old.code]; }
+      else if(payload.new){ whLabel[payload.new.code] = payload.new.label; }
+      refreshNiftiLocations();
+      renderWarehouseTabs();
+      if(document.getElementById('manageWarehousesModal') && !document.getElementById('manageWarehousesModal').classList.contains('hidden')) renderManageWarehousesList();
+      renderInventoryTable(); // self-guards on invTableBody not being in the DOM
+    })
+    .subscribe();
+}
+
 // Two subscriptions, not one — Realtime filters can't express "buyer OR supplier" across two
 // columns in a single filter, so each side of a relationship gets its own channel.
 let poRealtimeChannels = [];
@@ -3359,7 +3611,15 @@ let poRealtimeChannels = [];
 function notifyPoRealtimeChange(po, isNewToMe){
   const myRole = myBusiness.type; // 'buyer' | 'supplier'
   const last = (po.history||[])[po.history.length-1];
-  if(!last || last.actor === myRole) return; // no history yet, or this change is my own
+  if(!last) return;
+  // Prefers the precise per-member check (actorMemberId, set by poLogHistory) so a TEAMMATE on the
+  // same side of the deal who didn't make this specific change still gets notified — comparing
+  // only the coarse role would incorrectly treat "any buyer" as "me," even when it was actually a
+  // colleague on a different device. Falls back to the role check for history entries that predate
+  // this field, or that come from a call site building history manually rather than through
+  // poLogHistory — a safe degradation to the previous (cross-account-only) behavior, not a break.
+  const isMyOwnChange = last.actorMemberId !== undefined ? last.actorMemberId === currentUserId : last.actor === myRole;
+  if(isMyOwnChange) return;
   if(po.supplierId === myBusiness.id){
     if(po.status === 'draft') return; // the buyer hasn't actually sent it yet — RLS lets a supplier see a draft row exist, but there's nothing to react to until it's sent
     // Deliberately NOT type:'purchase'/'split'/'negotiation'/'confirm' — renderSupplierInbox gives
@@ -3792,7 +4052,7 @@ window.addEventListener('online', () => {
   // Real accounts get an actual retry of every unsent order/message (see retryPendingPOs/
   // retryPendingMessages) instead of having the pending flag cleared with nothing behind it; the
   // demo has no server to retry against, so its data just drops the flag as before.
-  if(myBusiness){ retryPendingPOs(); retryPendingMessages(); }
+  if(myBusiness){ retryPendingPOs(); retryPendingMessages(); retryPendingInventorySync(); }
   else{
     purchaseOrders.forEach(po => { po._pendingSync = false; (po.history||[]).forEach(h=>{ h._pendingSync = false; }); });
     getConversations().forEach(c => (c.messages||[]).forEach(m => { m._pendingSync = false; }));
@@ -5169,6 +5429,7 @@ function submitConsume(code){
   updateInvStatusFromStock(item);
   document.getElementById('consumeForm_'+code).innerHTML='';
   renderInventoryTable();
+  syncInventoryToSupabase();
 }
 function openReceiveForm(code){
   const el = document.getElementById('receiveForm_'+code);
@@ -5192,6 +5453,7 @@ function submitReceive(code){
   updateInvStatusFromStock(item);
   document.getElementById('receiveForm_'+code).innerHTML='';
   renderInventoryTable();
+  syncInventoryToSupabase();
 }
 inventoryData.forEach(syncBatchTotals);
 
@@ -5244,6 +5506,7 @@ function addWarehouse(){
   input.value = '';
   renderManageWarehousesList();
   renderWarehouseTabs();
+  syncWarehousesToSupabase();
 }
 function removeWarehouse(id){
   if(inventoryData.some(i => i.warehouse === id)){ showToast('Move all products out of this warehouse before removing it.'); return; }
@@ -5264,6 +5527,7 @@ function confirmRemoveWarehouse(id){
   renderManageWarehousesList();
   renderWarehouseTabs();
   renderInventoryTable();
+  deleteLocationFromSupabase(id);
 }
 // Gap: there was no way to add a brand-new product to Inventory, or remove one that's
 // discontinued — only existing items could be edited.
@@ -5298,14 +5562,15 @@ function confirmAddInventoryItem(){
   const supplier = document.getElementById('newInvSupplier').value.trim() || 'Not set';
   const barcode = document.getElementById('newInvBarcode') ? document.getElementById('newInvBarcode').value.trim() : '';
   if(!name){ showToast('Please enter a product name.'); return; }
-  const code = 'SKU-'+(1000+Math.floor(Math.random()*8999));
+  const code = generateUniqueSkuCode('SKU-', inventoryData, 1000, 8999);
   const status = onHand <= rop ? 'critical' : onHand <= rop*1.5 ? 'warning' : 'healthy';
-  const newItem = {code, name, warehouse, onHand, rop, maxLevel:rop*3, lot:null, exp:null, status, supplier, daysLeft:14, leadTime:5};
+  const newItem = {id: newRecordId(), code, name, warehouse, onHand, rop, maxLevel:rop*3, lot:null, exp:null, status, supplier, daysLeft:14, leadTime:5};
   if(barcode) newItem.barcode = barcode; else assignBarcodeIfMissing(newItem, '48');
   inventoryData.push(newItem);
   autoDraftReorderIfNeeded(newItem);
   document.getElementById('addInventoryItemForm').innerHTML = '';
   renderInventoryTable();
+  syncInventoryToSupabase();
 }
 // This used to rely on a native confirm() dialog — in some preview/testing environments those
 // get auto-dismissed or suppressed entirely, which makes a real destructive action look like a
@@ -5325,9 +5590,11 @@ function deleteInventoryItem(code){
 }
 function confirmDeleteInventoryItem(code){
   if(!requirePermission('deleteInventoryItem')) return;
+  const removed = inventoryData.find(i=>i.code===code);
   inventoryData = inventoryData.filter(i=>i.code!==code);
   invExpandedCode = null; invExpandedMode = null;
   renderInventoryTable();
+  if(removed) deleteInventoryItemFromSupabase(removed.id);
 }
 function setWarehouseFilter(wh, el){
   invWarehouseFilter = wh;
@@ -5415,11 +5682,13 @@ function toggleRopTracking(code){
   const item = inventoryData.find(i=>i.code===code);
   item.ropEnabled = item.ropEnabled === false ? true : false;
   renderInventoryTable();
+  syncInventoryToSupabase();
 }
 function toggleMaxLevelTracking(code){
   const item = inventoryData.find(i=>i.code===code);
   item.maxLevelEnabled = item.maxLevelEnabled === false ? true : false;
   renderInventoryTable();
+  syncInventoryToSupabase();
 }
 function toggleInvColumn(which){
   if(which === 'warehouse') invShowWarehouseCol = !invShowWarehouseCol;
@@ -5446,6 +5715,7 @@ function toggleInvFieldVisibility(code, field){
   const item = inventoryData.find(i=>i.code===code);
   item[field] = item[field] === false ? true : false;
   renderInventoryTable();
+  syncInventoryToSupabase();
 }
 // Gap: batches could only be viewed/added from the separate "batches" dropdown, and only if the
 // item already had at least one — there was no way to start tracking batches for a product from
@@ -5471,11 +5741,13 @@ function addEditBatchRow(code){
   item.batches.push({lot:'', qty:0, exp:APP_TODAY || new Date().toISOString().slice(0,10)});
   invExpandedCode = code; invExpandedMode = 'edit';
   renderInventoryTable();
+  syncInventoryToSupabase();
 }
 function updateEditBatch(code, idx, field, value){
   const item = inventoryData.find(i=>i.code===code);
   if(!item.batches || !item.batches[idx]) return;
   item.batches[idx][field] = field==='qty' ? (parseInt(value)||0) : value;
+  syncInventoryToSupabase();
 }
 function removeEditBatch(code, idx){
   const item = inventoryData.find(i=>i.code===code);
@@ -5483,6 +5755,7 @@ function removeEditBatch(code, idx){
   item.batches.splice(idx,1);
   invExpandedCode = code; invExpandedMode = 'edit';
   renderInventoryTable();
+  syncInventoryToSupabase();
 }
 // Automation #3 — the moment something crosses into "Reorder Now," a draft PO is prepared
 // automatically so there's nothing to build from scratch. It's never sent without a human
@@ -5570,6 +5843,7 @@ function invSaveEdit(code){
   autoDraftReorderIfNeeded(item);
   invExpandedCode = null; invExpandedMode = null;
   renderInventoryTable();
+  syncInventoryToSupabase();
 }
 // New warehouses can be added right from Edit, not just the separate Manage Warehouses screen —
 // it saves into the same shared list, so it's available for every product from then on.
@@ -5583,6 +5857,8 @@ function addWarehouseFromEdit(code){
   item.warehouse = id;
   renderWarehouseTabs();
   renderInventoryTable();
+  syncWarehousesToSupabase();
+  syncInventoryToSupabase();
 }
 
 /* ============ SUPPLIER SUPPLY & FULFILLMENT (the supplier-side "inventory" view) ============ */
@@ -5651,9 +5927,11 @@ function removeSupplyItem(code){
 function confirmRemoveSupplyItem(code){
   if(!requirePermission('deleteInventoryItem')) return;
   const idx = supplyData.findIndex(i=>i.code===code);
+  const removedId = idx>-1 ? supplyData[idx].id : null;
   if(idx>-1) supplyData.splice(idx,1);
   expandedSupplyCode = null; expandedSupplyMode = null;
   renderSupplyTable();
+  if(removedId) deleteSupplyItemFromSupabase(removedId);
 }
 // Mirrors openAddInventoryItem/confirmAddInventoryItem on the buyer side — until now there was
 // no way to add a new product to fulfillment tracking at all; only to the public Discover price
@@ -5765,13 +6043,14 @@ function confirmAddSupplyItem(){
   const onHand = parseInt(document.getElementById('newSupplyOnHand').value) || 0;
   const restockLevel = parseInt(document.getElementById('newSupplyRestockLevel').value) || 10;
   const barcode = document.getElementById('newSupplyBarcode') ? document.getElementById('newSupplyBarcode').value.trim() : '';
-  const code = 'PROD-'+(100+supplyData.length+Math.floor(Math.random()*900));
-  const newItem = {code, name, location, onHand, committed:0, restockLevel};
+  const code = generateUniqueSkuCode('PROD-', supplyData, 100, 900);
+  const newItem = {id: newRecordId(), code, name, location, onHand, committed:0, restockLevel};
   if(barcode) newItem.barcode = barcode; else assignBarcodeIfMissing(newItem, '48');
   supplyData.push(newItem);
   document.getElementById('addSupplyItemForm').innerHTML = '';
   renderSupplyTable();
   showToast(`${name} added to your supply list.`, 'success');
+  syncSupplyToSupabase();
 }
 // One save for everything about this product — name, location, and the real stock count all
 // set together. Committed is never touched here; that's handled automatically when orders are
@@ -5809,6 +6088,8 @@ function saveSupplyEdit(code){
   item.logStockMsg = {text:'✓ Saved', color:'var(--green)'};
   expandedSupplyCode = null; expandedSupplyMode = null;
   renderSupplyTable();
+  scheduleNiftiSave();
+  syncSupplyToSupabase();
 }
 function renderSupplyTable(){
   if(!document.getElementById('supplyTableBody')) return;
@@ -6047,6 +6328,7 @@ function applyRestockSuggestion(code, suggestedRop){
   renderRestockSuggestionsPanel();
   showToast(`Restock level for ${item.name} updated to ${suggestedRop}.`, 'success');
   scheduleNiftiSave();
+  syncInventoryToSupabase();
 }
 function renderInventoryTable(){
   if(!document.getElementById('invTableBody')) return;
@@ -6905,7 +7187,12 @@ function readImageFileCompressed(file, callback, maxDimension, quality){
   };
   reader.readAsDataURL(file);
 }
-function poLogHistory(po, actor, action){ po.history.push({date:APP_TODAY, time:'Just now', actor, action, _pendingSync: isOffline}); if(isOffline) po._pendingSync = true; syncPoToSupabase(po); }
+// actorMemberId records WHICH signed-in team member made this change (currentUserId, the real
+// team_members row id for a real account) alongside the existing coarse actor role ('buyer'/
+// 'supplier'). notifyPoRealtimeChange uses it to tell "a teammate on my own side just did this"
+// apart from "I did this myself" — the role alone can't make that distinction, since every
+// teammate on one side of a deal shares the same role string.
+function poLogHistory(po, actor, action){ po.history.push({date:APP_TODAY, time:'Just now', actor, action, actorMemberId: myBusiness ? currentUserId : undefined, _pendingSync: isOffline}); if(isOffline) po._pendingSync = true; syncPoToSupabase(po); }
 
 const purchaseOrders = [
   // ---- Buyer-only (visible only from Dela Cruz Hardware's Orders & Freight) ----
@@ -8326,6 +8613,7 @@ function submitRecordSale(){
     if(item){
       const before = item.onHand;
       item.onHand -= li.qty;
+      updateInvStatusFromStock(item); // was missing — a sale could push an item into critical/warning without the status field ever reflecting it
       logAudit('manual_override', 'inventoryItem', item.code, 'onHand', before, item.onHand, 'Sold to '+(downstreamCustomers.find(c=>c.id===customerId)||{}).name);
       const skuId = resolveSkuId(item.name);
       if(skuId) recordMovement({skuId, locationId: item.warehouse?'loc_buyer_'+item.warehouse:null, quantityDelta:-li.qty, movementType: MOVEMENT_TYPES.CONSUMPTION, reason:'Sold to customer', source:'Sales', confidence: CONFIDENCE.VERIFIED});
@@ -8337,6 +8625,7 @@ function submitRecordSale(){
   if(document.getElementById('invTableBody')) renderInventoryTable();
   showToast('Sale recorded — stock updated.', 'success');
   scheduleNiftiSave();
+  syncInventoryToSupabase();
 }
 function openRecordSalePaymentForm(saleId){
   const el = document.getElementById('saleRecordPaymentForm_'+saleId);
@@ -10580,6 +10869,7 @@ function applyOrderToSupplierCommitted(po){
     if(match){ match.committed += li.qty; }
   });
   if(document.getElementById('supplyTableBody')) renderSupplyTable();
+  syncSupplyToSupabase();
 }
 function applyDeliveryToSupplierStock(po, receivedQuantities){
   if(po.supplierId !== ME_SUPPLIER) return;
@@ -10599,6 +10889,7 @@ function applyDeliveryToSupplierStock(po, receivedQuantities){
     }
   });
   if(document.getElementById('supplyTableBody')) renderSupplyTable();
+  syncSupplyToSupabase();
 }
 // Automation #1 (buyer side) — a confirmed delivery matches its line items to existing products
 // by name and adds the received quantity straight to on-hand, then recomputes status. Products
@@ -10626,6 +10917,7 @@ function applyDeliveryToInventory(po, receivedQuantities){
       source:'Nifti — delivery confirmation', confidence: CONFIDENCE.VERIFIED});
   });
   if(document.getElementById('inventoryTheadRow')) renderInventoryTable();
+  syncInventoryToSupabase();
 }
 function submitDeliveryConfirm(id){
   const po = getPO(id);
@@ -12901,7 +13193,10 @@ let rfqRealtimeChannels = [];
 function notifyRfqRealtimeChange(rfq, isNewToMe){
   const myRole = myBusiness.type;
   const last = (rfq.history||[])[rfq.history.length-1];
-  if(!last || last.actor === myRole) return;
+  if(!last) return;
+  // Same per-member preference as notifyPoRealtimeChange — see there for the full reasoning.
+  const isMyOwnChange = last.actorMemberId !== undefined ? last.actorMemberId === currentUserId : last.actor === myRole;
+  if(isMyOwnChange) return;
   // No `type` set — see the comment in notifyPoRealtimeChange on why 'purchase' etc. would render
   // a cosmetic-only Accept/Decline button here too. poId is null (this isn't a PO), so this falls
   // through to a plain Acknowledge button rather than a misleading action.
@@ -13029,7 +13324,7 @@ async function sendRfq(){
     const { data, error } = await sb.from('rfqs').insert({
       buyer_business_id: myBusiness.id, supplier_business_id: supplierId,
       items:[{product, qty}], needed_by_date: neededBy, notes, status:'sent',
-      history:[{date: APP_TODAY, time:'Just now', actor:'buyer', action:'RFQ sent'}],
+      history:[{date: APP_TODAY, time:'Just now', actor:'buyer', action:'RFQ sent', actorMemberId: currentUserId}],
     }).select().single();
     if(error){ showToast("Couldn't send that RFQ — try again.", 'error'); return; }
     rfqs.push(await mapRfqRowToJs(data));
@@ -13066,7 +13361,7 @@ async function submitQuote(id){
   if(!valid){ showToast('Please select a validity date for this quote.'); return; }
   const quote = {unitPrice:price, leadTimeDays:lead, validUntil:valid, note};
   const historyEntry = myBusiness
-    ? {date: APP_TODAY, time:'Just now', actor:'supplier', action:'Quote submitted'}
+    ? {date: APP_TODAY, time:'Just now', actor:'supplier', action:'Quote submitted', actorMemberId: currentUserId}
     : {date:'2026-08-26', time:'11:00 AM', actor:'supplier', action:'Quote submitted'};
   const newHistory = [...rfq.history, historyEntry];
   if(myBusiness){
@@ -13083,7 +13378,7 @@ async function acceptRfqQuote(id){
   if(!requirePermission('sendOrder')) return; // accepting a quote creates a real draft PO — same gate as sendRfq/sending an actual PO
   const rfq = rfqs.find(r=>r.id===id);
   const today = APP_TODAY;
-  const historyEntry = {date: today, time: myBusiness ? 'Just now' : '11:30 AM', actor:'buyer', action:'Quote accepted'};
+  const historyEntry = {date: today, time: myBusiness ? 'Just now' : '11:30 AM', actor:'buyer', action:'Quote accepted', actorMemberId: myBusiness ? currentUserId : undefined};
   const newHistory = [...rfq.history, historyEntry];
   if(myBusiness){
     const { error } = await sb.from('rfqs').update({ status:'accepted', history:newHistory }).eq('id', id);
@@ -13111,7 +13406,7 @@ async function acceptRfqQuote(id){
 async function declineRfqQuote(id){
   const rfq = rfqs.find(r=>r.id===id);
   const historyEntry = myBusiness
-    ? {date: APP_TODAY, time:'Just now', actor:'buyer', action:'Quote declined'}
+    ? {date: APP_TODAY, time:'Just now', actor:'buyer', action:'Quote declined', actorMemberId: currentUserId}
     : {date:'2026-08-26', time:'1:15 PM', actor:'buyer', action:'Quote declined'};
   const newHistory = [...rfq.history, historyEntry];
   if(myBusiness){
@@ -15734,6 +16029,7 @@ function submitStockAdjustment(code){
     invCancel(); // closes the expand row and re-renders the table with the new numbers
     showToast('Stock adjustment saved.', 'success');
     scheduleNiftiSave();
+    syncInventoryToSupabase();
   } else {
     showToast('No change — quantity was already '+newQty+'.');
   }
@@ -15849,6 +16145,7 @@ function commitStocktake(){
   renderInventoryTable();
   showToast(`Stocktake committed — ${count} item${count>1?'s':''} adjusted.`, 'success');
   scheduleNiftiSave();
+  syncInventoryToSupabase();
 }
 // ---- Supply-side stocktake (the supplier's own stock — supplyData, not inventoryData) ----
 // The buyer's Inventory got a real stocktake session a few rounds back; the supplier's own
@@ -15986,6 +16283,7 @@ function commitSupplyStocktake(){
   renderSupplyTable();
   showToast(`Stocktake committed — ${count} product${count>1?'s':''} adjusted.`, 'success');
   scheduleNiftiSave();
+  syncSupplyToSupabase();
 }
 function resolveSkuId(rawName){
   const norm = normalizeSkuName(rawName);
@@ -17137,6 +17435,7 @@ function executeInternalTransfer(fromCode, toCode, qty){
   refreshDataQualityIssues();
   if(document.getElementById('page-inventory')) renderInventoryTable();
   scheduleNiftiSave();
+  syncInventoryToSupabase();
   showToast(`Moved ${qty} units from ${whLabel[donor.warehouse]} to ${whLabel[deficit.warehouse]}.`, 'success');
   return true;
 }
@@ -17767,10 +18066,10 @@ function commitInventoryImport(){
       item._meta = createMeta('CSV import: '+s.filename, CONFIDENCE.NEEDS_REVIEW, {sourceTimestamp:APP_TODAY, importedAt:APP_TODAY, lastVerifiedAt:APP_TODAY});
       item._importBatchId = batchId;
     } else {
-      const code = 'SKU-'+(1000+Math.floor(Math.random()*8999));
+      const code = generateUniqueSkuCode('SKU-', inventoryData, 1000, 8999);
       const rop = r.rop!=null ? r.rop : 10;
       inventoryData.push({
-        code, name:r.name, warehouse:r.warehouse, onHand:r.onHand, unit:r.unit||undefined,
+        id: newRecordId(), code, name:r.name, warehouse:r.warehouse, onHand:r.onHand, unit:r.unit||undefined,
         rop, maxLevel: r.maxLevel!=null ? r.maxLevel : rop*3, lot:null, exp:null,
         status: r.onHand<=rop ? 'critical' : r.onHand<=rop*1.5 ? 'warning' : 'healthy',
         supplier:'Not set', daysLeft:14, leadTime:5,
@@ -17795,6 +18094,7 @@ function commitInventoryImport(){
   renderInventoryTable();
   closeImportInventoryModal();
   scheduleNiftiSave();
+  syncInventoryToSupabase();
   showToast(`Imported ${rows.length} row(s) from ${s.filename}.`, 'success');
   surfaceFreshInsightIfAny();
 }
@@ -17803,6 +18103,10 @@ function undoImportBatch(batchId){
   if(!requirePermission('editInventory')) return;
   const batch = NiftiDB.importBatches.find(b=>b.id===batchId);
   if(!batch || batch.rolledBack) return;
+  // Capture the real ids of the rows this batch added before they're filtered out below — needed
+  // to delete the matching Supabase rows, since batch.addedCodes only has the human-facing SKU
+  // code, not the id a real account's row was actually upserted under.
+  const removedIds = inventoryData.filter(i => batch.addedCodes.includes(i.code)).map(i=>i.id).filter(Boolean);
   inventoryData = inventoryData.filter(i => !batch.addedCodes.includes(i.code));
   batch.updatedSnapshots.forEach(snap => {
     const item = inventoryData.find(i=>i.code===snap.code);
@@ -17817,6 +18121,8 @@ function undoImportBatch(batchId){
   renderInventoryTable();
   renderDataCenterImportsTab();
   scheduleNiftiSave();
+  removedIds.forEach(deleteInventoryItemFromSupabase);
+  syncInventoryToSupabase();
   showToast(`Import from ${batch.filename} was rolled back.`, 'success');
 }
 function setDataCenterView(view, btn){
@@ -19834,6 +20140,7 @@ function collectNiftiPersistableState(){
     dismissedInsightKeys: NiftiDB.dismissedInsightKeys,
     poIdCounter, whIdCounter, supplierInboxCounter, buyerInboxCounter, invoiceIdCounter, rfqIdCounter,
     poTemplates, savedBuyerAddresses, termsOfTrade, relationshipNotes,
+    inventorySyncDirty, supplySyncDirty, warehousesSyncDirty,
     currentAppRole, currentUserId, currentLanguage,
     whLabel, supplyLocationLabel,
     taxProfiles,
@@ -19851,7 +20158,19 @@ function collectNiftiPersistableState(){
 // refilled in place. NiftiDB.auditLog is a plain object property, safe to reassign.
 function applyNiftiPersistedState(s){
   if(!s) return false;
-  inventoryData = s.inventoryData || inventoryData;
+  // Restored FIRST, before the inventory/supply/warehouse restores below decide anything from
+  // them — see the comment above their declaration for the full reasoning. In short: if this was
+  // still dirty (unsynced) the last time this device saved, the local copy below is real, unsent
+  // data that must survive this reload; loadRealInventory()/loadRealSupply()/loadRealWarehouses()
+  // (called later in bootNifti) check these same flags again before ever overwriting from the
+  // server, so the two checks stay in agreement.
+  inventorySyncDirty = !!s.inventorySyncDirty;
+  supplySyncDirty = !!s.supplySyncDirty;
+  warehousesSyncDirty = !!s.warehousesSyncDirty;
+  // Guarded for a real account, same reasoning as customRoles below — loadRealInventory() (called
+  // later in bootNifti) is normally the authoritative source, UNLESS inventorySyncDirty says this
+  // device has real edits the server never received yet, in which case the local copy must win.
+  if(!myBusiness || inventorySyncDirty) inventoryData = s.inventoryData || inventoryData;
   standingPriceAgreements = s.standingPriceAgreements || standingPriceAgreements;
   deletedPriceAgreements = s.deletedPriceAgreements || deletedPriceAgreements;
   supplierInbox = s.supplierInbox || supplierInbox;
@@ -19913,7 +20232,7 @@ function applyNiftiPersistedState(s){
   currentUserId = s.currentUserId || currentUserId;
   currentLanguage = s.currentLanguage || currentLanguage;
 
-  if(s.supplyData){ supplyData.length = 0; supplyData.push(...s.supplyData); }
+  if((!myBusiness || supplySyncDirty) && s.supplyData){ supplyData.length = 0; supplyData.push(...s.supplyData); } // see inventoryData above
   if(s.suppliersData){ suppliersData.length = 0; suppliersData.push(...s.suppliersData); }
   if(s.buyersData){ buyersData.length = 0; buyersData.push(...s.buyersData); }
   if(s.buyerConversations){ buyerConversations.length = 0; buyerConversations.push(...s.buyerConversations); }
@@ -19936,7 +20255,7 @@ function applyNiftiPersistedState(s){
   if(typeof s.myBuyerProfilePublic === 'boolean'){ myBuyerProfilePublic = s.myBuyerProfilePublic; }
   if(s.reminderLog){ NiftiDB.reminderLog = s.reminderLog; }
   if(s.dismissedInsightKeys){ NiftiDB.dismissedInsightKeys = s.dismissedInsightKeys; }
-  if(s.whLabel){ Object.keys(whLabel).forEach(k=>delete whLabel[k]); Object.assign(whLabel, s.whLabel); }
+  if((!myBusiness || warehousesSyncDirty) && s.whLabel){ Object.keys(whLabel).forEach(k=>delete whLabel[k]); Object.assign(whLabel, s.whLabel); } // see inventoryData above
   if(s.supplyLocationLabel){ Object.keys(supplyLocationLabel).forEach(k=>delete supplyLocationLabel[k]); Object.assign(supplyLocationLabel, s.supplyLocationLabel); }
 
   // A blob saved before log-capping existed could already be oversized — trim it right away on
@@ -20177,6 +20496,13 @@ async function bootNifti(){
     await loadMyRfqs();
     subscribeToRfqs();
     subscribeToTeamAndRoles();
+    await loadRealInventory();
+    subscribeToInventory();
+    await loadRealSupply();
+    subscribeToSupply();
+    await loadRealWarehouses();
+    subscribeToLocations();
+    retryPendingInventorySync(); // picks up anything still unsynced from before this reload if we're already back online
     applyRealAccountUI();
     navigate('dashboard');
     handlePaymentResultHash(); // after navigate('dashboard') so a #payment-result redirect's own navigate('orders') is the one that actually sticks
