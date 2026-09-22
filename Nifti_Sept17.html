@@ -3463,7 +3463,12 @@ function ensureRecordIds(dataset){
 // loadRealSupply/loadRealWarehouses and retryPendingInventorySync below for how they're used.
 let inventorySyncDirty = false, supplySyncDirty = false, warehousesSyncDirty = false;
 async function syncInventoryToSupabase(){
-  if(!myBusiness || !inventoryData.length) return;
+  if(!myBusiness) return;
+  // An empty array is a legitimate state to sync too (e.g. the last item was just deleted) — the
+  // old version returned here BEFORE clearing the dirty flag, so a business that emptied its
+  // inventory while dirty could never clear it again: every future load would see
+  // inventorySyncDirty still true and refuse to ever pull real server data again, permanently.
+  if(!inventoryData.length){ if(inventorySyncDirty){ inventorySyncDirty = false; scheduleNiftiSave(); } return; }
   ensureRecordIds(inventoryData);
   if(isOffline){ inventorySyncDirty = true; scheduleNiftiSave(); return; }
   try{
@@ -3473,7 +3478,8 @@ async function syncInventoryToSupabase(){
   }catch(e){ console.warn('Inventory sync failed:', e); inventorySyncDirty = true; scheduleNiftiSave(); }
 }
 async function syncSupplyToSupabase(){
-  if(!myBusiness || !supplyData.length) return;
+  if(!myBusiness) return;
+  if(!supplyData.length){ if(supplySyncDirty){ supplySyncDirty = false; scheduleNiftiSave(); } return; } // see syncInventoryToSupabase
   ensureRecordIds(supplyData);
   if(isOffline){ supplySyncDirty = true; scheduleNiftiSave(); return; }
   try{
@@ -3489,7 +3495,7 @@ async function syncSupplyToSupabase(){
 async function syncWarehousesToSupabase(){
   if(!myBusiness || myBusiness.type !== 'buyer') return; // supplyLocationLabel has no real rows to sync — see loadRealWarehouses
   const rows = Object.keys(whLabel).map(code => ({ business_id: myBusiness.id, code, label: whLabel[code] }));
-  if(!rows.length) return;
+  if(!rows.length){ if(warehousesSyncDirty){ warehousesSyncDirty = false; scheduleNiftiSave(); } return; } // see syncInventoryToSupabase
   if(isOffline){ warehousesSyncDirty = true; scheduleNiftiSave(); return; }
   try{
     const { error } = await sb.from('locations').upsert(rows, { onConflict: 'business_id,code' });
@@ -3499,34 +3505,67 @@ async function syncWarehousesToSupabase(){
 }
 // Reconnect handling, same idea as retryPendingMessages/retryPendingPOs: actually re-pushes
 // whatever didn't make it, instead of just assuming everything is fine once the network is back.
+// Deletes need the same "did this actually reach the server" tracking the bulk syncs have.
+// Without it, a delete that fails silently (offline, a dropped request, the tab closing right
+// after the user confirms "Yes, remove it") leaves the row alive in Supabase — the item vanishes
+// locally, looks deleted, but the next successful load pulls it straight back from the server,
+// silently undoing the user's explicit action. These lists are persisted (see
+// collectNiftiPersistableState) so the retry survives a reload/crash, not just this tab session.
+let pendingInventoryDeleteIds = [], pendingSupplyDeleteIds = [], pendingLocationDeleteCodes = [];
 async function retryPendingInventorySync(){
   if(!myBusiness || isOffline) return;
+  if(pendingInventoryDeleteIds.length){
+    for(const id of [...pendingInventoryDeleteIds]) await deleteInventoryItemFromSupabase(id);
+  }
+  if(pendingSupplyDeleteIds.length){
+    for(const id of [...pendingSupplyDeleteIds]) await deleteSupplyItemFromSupabase(id);
+  }
+  if(pendingLocationDeleteCodes.length){
+    for(const code of [...pendingLocationDeleteCodes]) await deleteLocationFromSupabase(code);
+  }
   if(inventorySyncDirty) await syncInventoryToSupabase();
   if(supplySyncDirty) await syncSupplyToSupabase();
   if(warehousesSyncDirty) await syncWarehousesToSupabase();
 }
 async function deleteInventoryItemFromSupabase(id){
   if(!myBusiness || !id) return;
-  const { error } = await sb.from('inventory_items').delete().eq('id', id).eq('business_id', myBusiness.id);
-  if(error) console.warn('Inventory item delete failed:', error.message);
+  if(isOffline){ if(!pendingInventoryDeleteIds.includes(id)){ pendingInventoryDeleteIds.push(id); scheduleNiftiSave(); } return; }
+  try{
+    const { error } = await sb.from('inventory_items').delete().eq('id', id).eq('business_id', myBusiness.id);
+    if(error){ console.warn('Inventory item delete failed:', error.message); if(!pendingInventoryDeleteIds.includes(id)){ pendingInventoryDeleteIds.push(id); scheduleNiftiSave(); } return; }
+  }catch(e){ console.warn('Inventory item delete failed:', e); if(!pendingInventoryDeleteIds.includes(id)){ pendingInventoryDeleteIds.push(id); scheduleNiftiSave(); } return; }
+  const i = pendingInventoryDeleteIds.indexOf(id);
+  if(i>-1){ pendingInventoryDeleteIds.splice(i,1); scheduleNiftiSave(); }
 }
 async function deleteSupplyItemFromSupabase(id){
   if(!myBusiness || !id) return;
-  const { error } = await sb.from('supply_items').delete().eq('id', id).eq('business_id', myBusiness.id);
-  if(error) console.warn('Supply item delete failed:', error.message);
+  if(isOffline){ if(!pendingSupplyDeleteIds.includes(id)){ pendingSupplyDeleteIds.push(id); scheduleNiftiSave(); } return; }
+  try{
+    const { error } = await sb.from('supply_items').delete().eq('id', id).eq('business_id', myBusiness.id);
+    if(error){ console.warn('Supply item delete failed:', error.message); if(!pendingSupplyDeleteIds.includes(id)){ pendingSupplyDeleteIds.push(id); scheduleNiftiSave(); } return; }
+  }catch(e){ console.warn('Supply item delete failed:', e); if(!pendingSupplyDeleteIds.includes(id)){ pendingSupplyDeleteIds.push(id); scheduleNiftiSave(); } return; }
+  const i = pendingSupplyDeleteIds.indexOf(id);
+  if(i>-1){ pendingSupplyDeleteIds.splice(i,1); scheduleNiftiSave(); }
 }
 async function deleteLocationFromSupabase(code){
   if(!myBusiness) return;
-  const { error } = await sb.from('locations').delete().eq('business_id', myBusiness.id).eq('code', code);
-  if(error) console.warn('Warehouse delete failed for', code, '—', error.message);
+  if(isOffline){ if(!pendingLocationDeleteCodes.includes(code)){ pendingLocationDeleteCodes.push(code); scheduleNiftiSave(); } return; }
+  try{
+    const { error } = await sb.from('locations').delete().eq('business_id', myBusiness.id).eq('code', code);
+    if(error){ console.warn('Warehouse delete failed for', code, '—', error.message); if(!pendingLocationDeleteCodes.includes(code)){ pendingLocationDeleteCodes.push(code); scheduleNiftiSave(); } return; }
+  }catch(e){ console.warn('Warehouse delete failed for', code, '—', e); if(!pendingLocationDeleteCodes.includes(code)){ pendingLocationDeleteCodes.push(code); scheduleNiftiSave(); } return; }
+  const i = pendingLocationDeleteCodes.indexOf(code);
+  if(i>-1){ pendingLocationDeleteCodes.splice(i,1); scheduleNiftiSave(); }
 }
 async function loadRealInventory(){
   if(!myBusiness) return;
   // If a sync attempt already failed or never got a chance this session (inventorySyncDirty —
   // restored from the last save, see applyNiftiPersistedState), the LOCAL array is ahead of
   // whatever the server has. Fetching and replacing here would throw away real, unsent stock
-  // edits — so instead of loading, push the local state up first.
+  // edits — so instead of loading, push the local state up first. Same idea for a delete that
+  // never reached the server: fetching now would resurrect the "deleted" item locally.
   if(inventorySyncDirty){ syncInventoryToSupabase(); return; }
+  if(pendingInventoryDeleteIds.length){ retryPendingInventorySync(); return; }
   const { data, error } = await sb.from('inventory_items').select('*').eq('business_id', myBusiness.id);
   if(error){ console.warn('Could not load inventory:', error.message); return; }
   inventoryData = (data||[]).map(mapInventoryRowToJs);
@@ -3534,6 +3573,7 @@ async function loadRealInventory(){
 async function loadRealSupply(){
   if(!myBusiness) return;
   if(supplySyncDirty){ syncSupplyToSupabase(); return; } // see loadRealInventory for why
+  if(pendingSupplyDeleteIds.length){ retryPendingInventorySync(); return; }
   const { data, error } = await sb.from('supply_items').select('*').eq('business_id', myBusiness.id);
   if(error){ console.warn('Could not load supply items:', error.message); return; }
   supplyData.length = 0;
@@ -3542,6 +3582,7 @@ async function loadRealSupply(){
 async function loadRealWarehouses(){
   if(!myBusiness || myBusiness.type !== 'buyer') return; // supplyLocationLabel has no real rows to load — see syncWarehousesToSupabase
   if(warehousesSyncDirty){ syncWarehousesToSupabase(); return; } // see loadRealInventory for why
+  if(pendingLocationDeleteCodes.length){ retryPendingInventorySync(); return; }
   const { data, error } = await sb.from('locations').select('*').eq('business_id', myBusiness.id);
   if(error){ console.warn('Could not load warehouses:', error.message); return; }
   Object.keys(whLabel).forEach(k => delete whLabel[k]);
@@ -20212,6 +20253,7 @@ function collectNiftiPersistableState(){
     poIdCounter, whIdCounter, supplierInboxCounter, buyerInboxCounter, invoiceIdCounter, rfqIdCounter,
     poTemplates, savedBuyerAddresses, termsOfTrade, relationshipNotes,
     inventorySyncDirty, supplySyncDirty, warehousesSyncDirty,
+    pendingInventoryDeleteIds, pendingSupplyDeleteIds, pendingLocationDeleteCodes,
     currentAppRole, currentUserId, currentLanguage,
     whLabel, supplyLocationLabel,
     taxProfiles,
@@ -20238,6 +20280,9 @@ function applyNiftiPersistedState(s){
   inventorySyncDirty = !!s.inventorySyncDirty;
   supplySyncDirty = !!s.supplySyncDirty;
   warehousesSyncDirty = !!s.warehousesSyncDirty;
+  pendingInventoryDeleteIds = s.pendingInventoryDeleteIds || pendingInventoryDeleteIds;
+  pendingSupplyDeleteIds = s.pendingSupplyDeleteIds || pendingSupplyDeleteIds;
+  pendingLocationDeleteCodes = s.pendingLocationDeleteCodes || pendingLocationDeleteCodes;
   // Guarded for a real account, same reasoning as customRoles below — loadRealInventory() (called
   // later in bootNifti) is normally the authoritative source, UNLESS inventorySyncDirty says this
   // device has real edits the server never received yet, in which case the local copy must win.
