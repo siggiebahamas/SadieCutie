@@ -4172,7 +4172,7 @@ window.addEventListener('online', () => {
   // Real accounts get an actual retry of every unsent order/message (see retryPendingPOs/
   // retryPendingMessages) instead of having the pending flag cleared with nothing behind it; the
   // demo has no server to retry against, so its data just drops the flag as before.
-  if(myBusiness){ retryPendingPOs(); retryPendingMessages(); retryPendingInventorySync(); }
+  if(myBusiness){ retryPendingPOs(); retryPendingMessages(); retryPendingInventorySync(); retryPendingPriceAgreements(); }
   else{
     purchaseOrders.forEach(po => { po._pendingSync = false; (po.history||[]).forEach(h=>{ h._pendingSync = false; }); });
     getConversations().forEach(c => (c.messages||[]).forEach(m => { m._pendingSync = false; }));
@@ -7552,6 +7552,97 @@ let standingPriceAgreements = [
 ];
 let deletedPriceAgreements = [];
 let agreementHistoryOpen = {};
+/* ============ REAL PRICE-AGREEMENT SYNC (Supabase-backed price_agreements) ============
+   standingPriceAgreements/deletedPriceAgreements had no real backend at all for a real account —
+   local-storage-only, so a supplier proposing a price on one device/session was never visible to
+   the buyer on theirs, and vice versa. Same shape-preserving, per-row-upsert approach as the PO
+   sync (one row per real action, not a bulk array sync): every mutation site calls
+   syncPriceAgreementToSupabase(agreement) right after changing it. Soft-deletes (deleted_at) keep
+   the same "removed agreements stay visible as history" behavior the local-only version already
+   had (price-drop warnings, the agreement history view), just backed by one real table instead of
+   two local arrays. */
+function mapPriceAgreementJsToRow(a){
+  return {
+    id: a.id, buyer_business_id: a.buyerId, supplier_business_id: a.supplierId,
+    product: a.product, price: a.price, unit: a.unit || null,
+    effective_date: a.effectiveDate || null, end_date: a.endDate || null, note: a.note || null,
+    status: a.status || 'pending', attachment_name: a.attachmentName || null,
+    proposed_by: a.proposedBy || 'buyer',
+    volume_tier_qty: a.volumeTierQty != null ? a.volumeTierQty : null,
+    volume_tier_price: a.volumeTierPrice != null ? a.volumeTierPrice : null,
+    deleted_at: a.deletedDate ? (a.deletedDate.length>10 ? a.deletedDate : a.deletedDate+'T00:00:00Z') : null,
+    deleted_reason: a.deletedReason || null,
+  };
+}
+function mapPriceAgreementRowToJs(row){
+  return {
+    id: row.id, buyerId: row.buyer_business_id, supplierId: row.supplier_business_id,
+    product: row.product, price: Number(row.price), unit: row.unit || '',
+    effectiveDate: row.effective_date || '', endDate: row.end_date || '', note: row.note || '',
+    status: row.status, attachmentName: row.attachment_name || '',
+    proposedBy: row.proposed_by || 'buyer',
+    volumeTierQty: row.volume_tier_qty != null ? Number(row.volume_tier_qty) : null,
+    volumeTierPrice: row.volume_tier_price != null ? Number(row.volume_tier_price) : null,
+    deletedDate: row.deleted_at ? row.deleted_at.slice(0,10) : undefined,
+    deletedReason: row.deleted_reason || undefined,
+  };
+}
+async function syncPriceAgreementToSupabase(agreement){
+  if(!myBusiness) return;
+  try{
+    const { error } = await sb.from('price_agreements').upsert(mapPriceAgreementJsToRow(agreement));
+    if(error){ console.warn('Price agreement sync failed:', error.message); agreement._pendingSync = true; scheduleNiftiSave(); return; }
+    agreement._pendingSync = false; scheduleNiftiSave();
+  }catch(e){ console.warn('Price agreement sync failed:', e); agreement._pendingSync = true; scheduleNiftiSave(); }
+}
+async function retryPendingPriceAgreements(){
+  if(!myBusiness || isOffline) return;
+  for(const a of [...standingPriceAgreements, ...deletedPriceAgreements].filter(a=>a._pendingSync)) await syncPriceAgreementToSupabase(a);
+}
+async function loadRealPriceAgreements(){
+  if(!myBusiness) return;
+  const { data, error } = await sb.from('price_agreements')
+    .select('*')
+    .or(`buyer_business_id.eq.${myBusiness.id},supplier_business_id.eq.${myBusiness.id}`);
+  if(error){ console.warn('Could not load price agreements:', error.message); return; }
+  // Same pending-wins-over-fetch preservation as loadRealPurchaseOrders — an agreement still
+  // waiting to reach the server (offline, a dropped request) is ahead of whatever this fetch
+  // returns for that id.
+  const pendingById = new Map([...standingPriceAgreements, ...deletedPriceAgreements].filter(a=>a._pendingSync).map(a=>[a.id, a]));
+  const mapped = (data||[]).map(mapPriceAgreementRowToJs);
+  const byId = new Map(mapped.map(a=>[a.id, a]));
+  pendingById.forEach((a, id) => byId.set(id, a));
+  const all = [...byId.values()];
+  standingPriceAgreements = all.filter(a=>!a.deletedDate);
+  deletedPriceAgreements = all.filter(a=>a.deletedDate);
+  if(deletedPriceAgreements.length > LOG_CAPS.deletedPriceAgreements) deletedPriceAgreements = deletedPriceAgreements.slice(-LOG_CAPS.deletedPriceAgreements);
+}
+let priceAgreementRealtimeChannels = [];
+function subscribeToPriceAgreements(){
+  if(!myBusiness) return;
+  priceAgreementRealtimeChannels.forEach(ch => sb.removeChannel(ch));
+  priceAgreementRealtimeChannels = [];
+  const onChange = (payload) => {
+    const row = payload.new && payload.new.id ? payload.new : payload.old;
+    if(!row || !row.id) return;
+    if(payload.eventType === 'DELETE'){
+      standingPriceAgreements = standingPriceAgreements.filter(a=>a.id!==row.id);
+      deletedPriceAgreements = deletedPriceAgreements.filter(a=>a.id!==row.id);
+    } else {
+      const mapped = mapPriceAgreementRowToJs(payload.new);
+      standingPriceAgreements = standingPriceAgreements.filter(a=>a.id!==mapped.id);
+      deletedPriceAgreements = deletedPriceAgreements.filter(a=>a.id!==mapped.id);
+      (mapped.deletedDate ? deletedPriceAgreements : standingPriceAgreements).push(mapped);
+    }
+    if(document.getElementById('suppliersTableBody')) renderSuppliersTable();
+  };
+  ['buyer_business_id','supplier_business_id'].forEach(col=>{
+    const ch = sb.channel('price-agreement-changes-'+col+'-'+myBusiness.id)
+      .on('postgres_changes', {event:'*', schema:'public', table:'price_agreements', filter:`${col}=eq.${myBusiness.id}`}, onChange)
+      .subscribe();
+    priceAgreementRealtimeChannels.push(ch);
+  });
+}
 /* ============ PER-SUPPLIER PRODUCT CATALOG (autocomplete source for PO line items + price agreements) ============ */
 let supplierProductCatalogs = {
   metro: [{name:'Structural I-Beams', unit:'length'},{name:'Steel Rebar 12mm', unit:'length'},{name:'Galvanized Wire 12ga', unit:'roll'},{name:'Welding Plates 6mm', unit:'piece'}],
@@ -8058,6 +8149,7 @@ function reconfirmAgreementPrice(id){
   if(!a) return;
   a.effectiveDate = APP_TODAY;
   renderSuppliersTable();
+  syncPriceAgreementToSupabase(a);
 }
 function toggleAgreementHistory(partyId){
   agreementHistoryOpen[partyId] = !agreementHistoryOpen[partyId];
@@ -8151,11 +8243,13 @@ function commitAgreement(partyId){
   const endDate = document.getElementById('agEndDate_'+partyId).value || '';
   const attachInput = document.getElementById('agAttachment_'+partyId);
   const attachmentName = (attachInput && attachInput.files[0]) ? attachInput.files[0].name : '';
-  standingPriceAgreements.push({id:'spa'+Date.now(), supplierId, buyerId, product, price, unit, effectiveDate:APP_TODAY, endDate, note:'', status:'pending', attachmentName, proposedBy: isSupplierRole ? 'supplier' : 'buyer',
+  const newAgreement = {id: myBusiness ? newRecordId() : 'spa'+Date.now(), supplierId, buyerId, product, price, unit, effectiveDate:APP_TODAY, endDate, note:'', status:'pending', attachmentName, proposedBy: isSupplierRole ? 'supplier' : 'buyer',
     volumeTierQty: parseFloat(document.getElementById('agTierQty_'+partyId).value) || null,
-    volumeTierPrice: parseFloat(document.getElementById('agTierPrice_'+partyId).value) || null});
+    volumeTierPrice: parseFloat(document.getElementById('agTierPrice_'+partyId).value) || null};
+  standingPriceAgreements.push(newAgreement);
   document.getElementById('agreementForm_'+partyId).innerHTML='';
   renderSuppliersTable();
+  syncPriceAgreementToSupabase(newAgreement);
 }
 function respondPriceAgreement(id, accept){
   if(!requirePermission('respondToPriceAgreement')) return;
@@ -8172,6 +8266,7 @@ function respondPriceAgreement(id, accept){
     refreshDataQualityIssues();
   }
   renderSuppliersTable();
+  syncPriceAgreementToSupabase(a);
 }
 function openDeleteAgreementForm(id, partyId){
   const el = document.getElementById('deleteAgreementForm_'+partyId);
@@ -8195,6 +8290,7 @@ function confirmDeleteAgreement(id, partyId){
   if(deletedPriceAgreements.length > LOG_CAPS.deletedPriceAgreements) deletedPriceAgreements.splice(0, deletedPriceAgreements.length - LOG_CAPS.deletedPriceAgreements);
   document.getElementById('deleteAgreementForm_'+partyId).innerHTML='';
   renderSuppliersTable();
+  syncPriceAgreementToSupabase(removed);
 }
 
 /* ============ TEAM & ROLES (multi-user accounts — UI/UX layer, not an auth gate) ============ */
@@ -20825,6 +20921,9 @@ async function bootNifti(){
     await loadRealWarehouses();
     subscribeToLocations();
     retryPendingInventorySync(); // picks up anything still unsynced from before this reload if we're already back online
+    await loadRealPriceAgreements();
+    subscribeToPriceAgreements();
+    retryPendingPriceAgreements(); // picks up anything still unsynced from before this reload if we're already back online
     applyRealAccountUI();
     navigate('dashboard');
     handlePaymentResultHash(); // after navigate('dashboard') so a #payment-result redirect's own navigate('orders') is the one that actually sticks
