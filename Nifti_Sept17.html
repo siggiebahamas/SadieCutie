@@ -2399,9 +2399,13 @@
             <th class="sortable-th" onclick="sortOrdersBy('po')">Order # <span class="sort-arrow" id="sortArrow_po"></span></th>
             <th class="sortable-th" onclick="sortOrdersBy('supplier')">Supplier <span class="sort-arrow" id="sortArrow_supplier"></span></th>
             <th class="sortable-th" onclick="sortOrdersBy('pipeline')">Pipeline <span class="sort-arrow" id="sortArrow_pipeline"></span></th>
-            <th class="sortable-th" onclick="sortOrdersBy('status')">Status <span class="sort-arrow" id="sortArrow_status"></span><span class="kpi-info" tabindex="0" onclick="event.stopPropagation();">ⓘ<span class="kpi-tooltip" style="bottom:auto;top:140%;width:170px;"><div style="display:flex;flex-direction:column;gap:6px;"><span class="status-pill pill-ok" style="padding:2px 9px;font-size:13px;">Done</span><span class="status-pill pill-neutral" style="padding:2px 9px;font-size:13px;">Waiting</span><span class="status-pill pill-lowstock" style="padding:2px 9px;font-size:13px;">Action Needed</span><span class="status-pill status-draft" style="padding:2px 9px;font-size:13px;border-color:#fff;color:#fff;">Draft</span><span class="status-pill pill-cancelled" style="padding:2px 9px;font-size:13px;">Cancelled</span></div></span></span></th>
             <th class="sortable-th" onclick="sortOrdersBy('amount')">Amount <span class="sort-arrow" id="sortArrow_amount"></span></th>
-            <th>Next Action <span class="kpi-info" tabindex="0">ⓘ<span class="kpi-tooltip" style="bottom:auto;top:140%;left:auto;right:0;width:170px;"><div style="display:flex;flex-direction:column;gap:6px;"><span class="status-pill pill-lowstock" style="padding:2px 9px;font-size:13px;">You</span><span class="status-pill pill-neutral" style="padding:2px 9px;font-size:13px;">Supplier</span><span class="status-pill pill-ok" style="padding:2px 9px;font-size:13px;">Nothing to do</span></div></span></span></th>
+            <!-- One column now, not two — Status and Next Action used to be separate pills, colored
+                 by two different functions that didn't always visually agree (a row could show a red
+                 status while its own Next Action bubble calmly said "Them"). This one always matches
+                 what it says: what state it's in (small text) plus, front and center, what to do
+                 about it (the pill) — sortable by the same underlying status as before. -->
+            <th class="sortable-th" onclick="sortOrdersBy('status')">What's happening <span class="sort-arrow" id="sortArrow_status"></span><span class="kpi-info" tabindex="0" onclick="event.stopPropagation();">ⓘ<span class="kpi-tooltip" style="bottom:auto;top:140%;left:auto;right:0;width:170px;"><div style="display:flex;flex-direction:column;gap:6px;"><span class="status-pill pill-lowstock" style="padding:2px 9px;font-size:13px;">Your turn</span><span class="status-pill pill-neutral" style="padding:2px 9px;font-size:13px;">Waiting on supplier</span><span class="status-pill pill-ok" style="padding:2px 9px;font-size:13px;">Done</span></div></span></span></th>
           </tr></thead>
           <tbody id="orderRows"></tbody>
         </table>
@@ -9389,6 +9393,26 @@ function getSupplierActionColorClass(o){
     default: return 'pill-ok';
   }
 }
+// One combined signal per order, replacing the old two-pill row display (a separate Status pill
+// and Next Action pill, colored by two different functions that didn't always visually agree —
+// see the comment on ACTION_CLASS_TO_CAT). Reuses the exact same underlying logic
+// (getBuyerActionColorClass/getBuyerNextAction, getSupplierActionColorClass/getSupplierNextAction)
+// — nothing about what counts as "your turn" changes, only how it's shown: one pill, one plain-
+// language message, one color that always matches what it says. Cancelled is special-cased since
+// the action classifier maps it to the same green "done" bucket as an order that finished
+// normally — that loses a real, important distinction a merged pill needs to keep.
+function renderBuyerActionPill(o){
+  if(o.status === 'cancelled') return `<span class="status-pill pill-cancelled">✕ Cancelled</span>`;
+  const cls = getBuyerActionColorClass(o);
+  const icon = o.status==='draft' ? '✎' : cls==='pill-lowstock' ? '●' : cls==='pill-ok' ? '✓' : '…';
+  return `<span class="status-pill ${cls}">${icon} ${getBuyerNextAction(o)}</span>`;
+}
+function renderSupplierActionPill(o){
+  if(o.status === 'cancelled') return `<span class="status-pill pill-cancelled">✕ Cancelled</span>`;
+  const cls = getSupplierActionColorClass(o);
+  const icon = cls==='pill-lowstock' ? '●' : cls==='pill-ok' ? '✓' : '…';
+  return `<span class="status-pill ${cls}">${icon} ${getSupplierNextAction(o)}</span>`;
+}
 function renderOrdersTable(){
   if(!document.getElementById('orderRows')) return; // see note on renderSupplierFulfillmentDashboard above — same reasoning, buyer side
   let rows = getBuyerPOs();
@@ -9428,18 +9452,18 @@ function renderOrdersTable(){
     const needsAction = getBuyerActionColorClass(o)==='pill-lowstock';
     const riskTag = o.atRisk ? `<span style="color:var(--danger);margin-right:5px;font-size:13px;" title="Running behind schedule" aria-hidden="true">⏱</span>` : '';
     return `<tr onclick="toggleOrderRow('${o.id}')" style="cursor:pointer;" class="${selected ? 'order-row-selected' : ''}">
-      <td class="po-cell" style="${needsAction ? `border-left:6px solid var(--lowstock-fill);` : ''}">${riskTag}${o.poNumber}${pendingSyncTagHtml(o)}</td><td>${o.supplierName}</td>
+      <td class="po-cell" style="${needsAction ? `border-left:6px solid var(--lowstock-fill);` : ''}">${riskTag}${o.poNumber}${pendingSyncTagHtml(o)}<div style="font-size:12.5px;color:var(--ink);opacity:.6;font-weight:600;margin-top:1px;">${PO_STATUS_LABELS[o.status]}</div></td><td>${o.supplierName}</td>
       <td><span class="pipe-tag ${o.type==='freight'?'tag-freight':'tag-local'}">${o.type==='freight'?'Import':'Local'}</span></td>
-      <td>${renderStatusPill(o)}</td><td>${fmtPHP(poTotal(o))}</td>
-      <td><span class="status-pill ${getBuyerActionColorClass(o)}">${getBuyerNextAction(o)}</span></td>
+      <td>${fmtPHP(poTotal(o))}</td>
+      <td>${renderBuyerActionPill(o)}</td>
     </tr>`;
   }).join('') || (getBuyerPOs().length===0
-    ? `<tr><td colspan="6" style="padding:0;"><div style="text-align:center;padding:48px 24px;">
+    ? `<tr><td colspan="5" style="padding:0;"><div style="text-align:center;padding:48px 24px;">
         <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:6px;">No purchase orders yet</div>
         <div style="font-size:15.5px;color:var(--ink);margin-bottom:16px;">Once you invite a supplier, you can create your first PO here — no marketplace, no cold vetting.</div>
         <button class="btn btn-primary" onclick="startCreatePO()">+ Create Purchase Order</button>
       </div></td></tr>`
-    : `<tr><td colspan="6" style="text-align:center;color:var(--ink);padding:24px;">No orders match your search or filter.</td></tr>`);
+    : `<tr><td colspan="5" style="text-align:center;color:var(--ink);padding:24px;">No orders match your search or filter.</td></tr>`);
   renderOrderDetailPane();
   updateOpenItemsBadge();
 }
@@ -10109,15 +10133,34 @@ function renderBuyerPoDetail(o){
     <div id="inlineMsg_${o.id}"></div>
     <div id="amendForm_${o.id}"></div>
     ${amendHtml}${rmaHtml}
-    ${renderFreightMilestoneTimeline(o, 'buyer')}
-    ${renderDeliveryTimeline(o, 'buyer')}
-    ${renderDocumentsSection(o, 'buyer')}
-    ${renderPoUtilityBar(o, 'buyer')}
-    ${renderLandedCostSection(o, 'buyer')}
+    ${renderPoSecondaryDetails(o, 'buyer')}`;
+}
+// PO management simplification — everything below the main action/line-items/delivery view
+// (freight timeline, documents, utility bar, landed cost, backorder, deposit, internal notes,
+// relationship notes) is real functionality nobody needs on every glance. Collapsed by default,
+// one tap away, so the modal's first screen is the single thing a low-literacy user needs to act on.
+let poSecondaryExpanded = {};
+function togglePoSecondaryDetails(id){
+  poSecondaryExpanded[id] = !poSecondaryExpanded[id];
+  refreshOrderModalIfOpen(id);
+}
+function renderPoSecondaryDetails(o, side){
+  const expanded = !!poSecondaryExpanded[o.id];
+  const body = `
+    ${renderFreightMilestoneTimeline(o, side)}
+    ${renderDeliveryTimeline(o, side)}
+    ${renderDocumentsSection(o, side)}
+    ${renderPoUtilityBar(o, side)}
+    ${renderLandedCostSection(o, side)}
     ${renderBackorderBanner(o)}
-    ${renderDepositSection(o, 'buyer')}
-    ${renderInternalCoordinationPanel(o, 'buyer')}
-    ${renderRelationshipNotes(o.supplierId, o.supplierName)}`;
+    ${renderDepositSection(o, side)}
+    ${renderInternalCoordinationPanel(o, side)}
+    ${side==='buyer' ? renderRelationshipNotes(o.supplierId, o.supplierName) : renderRelationshipNotes(o.buyerId, o.buyerName)}
+  `;
+  return `<div style="text-align:center;margin:16px 0 4px;border-top:1px solid var(--border);padding-top:14px;">
+    <span class="row-action" onclick="event.stopPropagation(); togglePoSecondaryDetails('${o.id}')">${expanded ? 'Show less ▲' : 'Show more details ▼'}</span>
+  </div>
+  <div class="${expanded ? '' : 'hidden'}">${body}</div>`;
 }
 // Section 5 #10 — shared, editable Relationship Notes per counterparty, visible to any
 // teammate with access to that relationship. Keyed by the counterparty's id.
@@ -12929,15 +12972,7 @@ function renderSupplierPoDetail(o){
     </div>` : ''}
     <div id="inlineMsg_${o.id}"></div>
     ${amendHtml}${rmaResolveHtml}
-    ${renderFreightMilestoneTimeline(o, 'supplier')}
-    ${renderDeliveryTimeline(o, 'supplier')}
-    ${renderDocumentsSection(o, 'supplier')}
-    ${renderPoUtilityBar(o, 'supplier')}
-    ${renderLandedCostSection(o, 'supplier')}
-    ${renderBackorderBanner(o)}
-    ${renderDepositSection(o, 'supplier')}
-    ${renderInternalCoordinationPanel(o, 'supplier')}
-    ${renderRelationshipNotes(o.buyerId, o.buyerName)}`;
+    ${renderPoSecondaryDetails(o, 'supplier')}`;
 }
 function renderSupplierOrdersTable(){
   if(!document.getElementById('supplierOrderRows')) return; // see note on renderSupplierFulfillmentDashboard above
@@ -12976,22 +13011,24 @@ function renderSupplierOrdersTable(){
     // rather than blended into the same color — those are two different questions.
     const needsAction = getSupplierActionColorClass(o)==='pill-lowstock';
     const riskTag = o.atRisk ? `<span style="color:var(--danger);margin-right:5px;font-size:13px;" title="Running behind schedule" aria-hidden="true">⏱</span>` : '';
+    // Status text folded into the action pill's small caption instead of its own separate pill —
+    // same fix as the buyer table (see renderBuyerActionPill/renderSupplierActionPill above).
+    const statusCaption = o.status==='delivered' ? PO_STATUS_LABELS[o.status]+' — '+(poDeliveredOnTime(o)?'on time':'late') : PO_STATUS_LABELS[o.status];
     return `<tr style="cursor:pointer;" onclick="toggleSupplierOrder('${o.id}')" class="${selected ? 'order-row-selected' : ''}">
-      <td class="po-cell" style="${needsAction ? `border-left:6px solid var(--lowstock-fill);` : ''}">${riskTag}${o.poNumber}${pendingSyncTagHtml(o)}</td>
+      <td class="po-cell" style="${needsAction ? `border-left:6px solid var(--lowstock-fill);` : ''}">${riskTag}${o.poNumber}${pendingSyncTagHtml(o)}<div style="font-size:12.5px;color:var(--ink);opacity:.6;font-weight:600;margin-top:1px;">${statusCaption}</div></td>
       <td>${o.buyerName}</td>
       <td>${o.lineItems[0].product}${o.lineItems.length>1?' +'+(o.lineItems.length-1):''} <span style="color:var(--ink);font-size:15px;">×${o.lineItems[0].qty}</span></td>
       <td>${o.requestedDeliveryDate}</td>
-      <td>${renderSupplierStatusPill(o)}</td>
-      <td><span class="status-pill ${getSupplierActionColorClass(o)}">${getSupplierNextAction(o)}</span></td>
+      <td>${renderSupplierActionPill(o)}</td>
       <td><span class="row-action">${selected ? 'Close ▲' : 'View ▼'}</span></td>
     </tr>`;
   }).join('');
   document.getElementById('supplierOrderRows').innerHTML = html || (getSupplierPOs().filter(o=>o.status!=='draft').length===0
-    ? `<tr><td colspan="7" style="padding:0;"><div style="text-align:center;padding:48px 24px;">
+    ? `<tr><td colspan="6" style="padding:0;"><div style="text-align:center;padding:48px 24px;">
         <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:6px;">No orders yet</div>
         <div style="font-size:15.5px;color:var(--ink);">Once a buyer sends you a purchase order, it'll show up here to confirm and fulfill.</div>
       </div></td></tr>`
-    : `<tr><td colspan="7" style="text-align:center;color:var(--ink);padding:24px;">No orders match your search or filter.</td></tr>`);
+    : `<tr><td colspan="6" style="text-align:center;color:var(--ink);padding:24px;">No orders match your search or filter.</td></tr>`);
   renderSupplierOrderDetailPane();
   updateOpenItemsBadge();
 }
@@ -13113,8 +13150,10 @@ function renderSupplierFulfillmentDashboard(refreshOnly){
           <th class="sortable-th" onclick="sortSupplierOrdersBy('buyer')">Buyer <span class="sort-arrow" id="supplierSortArrow_buyer"></span></th>
           <th class="sortable-th" onclick="sortSupplierOrdersBy('product')">Product <span class="sort-arrow" id="supplierSortArrow_product"></span></th>
           <th class="sortable-th" onclick="sortSupplierOrdersBy('promised')">Promised <span class="sort-arrow" id="supplierSortArrow_promised"></span></th>
-          <th class="sortable-th" onclick="sortSupplierOrdersBy('status')">Status <span class="sort-arrow" id="supplierSortArrow_status"></span><span class="kpi-info" tabindex="0" onclick="event.stopPropagation();">ⓘ<span class="kpi-tooltip" style="bottom:auto;top:140%;width:170px;"><div style="display:flex;flex-direction:column;gap:6px;"><span class="status-pill pill-ok" style="padding:2px 9px;font-size:13px;">Done</span><span class="status-pill pill-neutral" style="padding:2px 9px;font-size:13px;">Waiting</span><span class="status-pill pill-lowstock" style="padding:2px 9px;font-size:13px;">Action Needed</span><span class="status-pill pill-cancelled" style="padding:2px 9px;font-size:13px;">Cancelled</span></div></span></span></th>
-          <th>Next Action <span class="kpi-info" tabindex="0">ⓘ<span class="kpi-tooltip" style="bottom:auto;top:140%;left:auto;right:0;width:170px;"><div style="display:flex;flex-direction:column;gap:6px;"><span class="status-pill pill-lowstock" style="padding:2px 9px;font-size:13px;">You</span><span class="status-pill pill-neutral" style="padding:2px 9px;font-size:13px;">Buyer</span><span class="status-pill pill-ok" style="padding:2px 9px;font-size:13px;">Nothing to do</span></div></span></span></th><th></th>
+          <!-- One column, not two — same fix as the buyer table (see renderBuyerActionPill's
+               comment for the full reasoning): status text moved into a small caption inside the
+               order-number cell, this column is now the single "what to do" signal. -->
+          <th class="sortable-th" onclick="sortSupplierOrdersBy('status')">What's happening <span class="sort-arrow" id="supplierSortArrow_status"></span><span class="kpi-info" tabindex="0" onclick="event.stopPropagation();">ⓘ<span class="kpi-tooltip" style="bottom:auto;top:140%;left:auto;right:0;width:170px;"><div style="display:flex;flex-direction:column;gap:6px;"><span class="status-pill pill-lowstock" style="padding:2px 9px;font-size:13px;">Your turn</span><span class="status-pill pill-neutral" style="padding:2px 9px;font-size:13px;">Waiting on buyer</span><span class="status-pill pill-ok" style="padding:2px 9px;font-size:13px;">Done</span></div></span></span></th><th></th>
         </tr></thead>
         <tbody id="supplierOrderRows"></tbody>
       </table>
