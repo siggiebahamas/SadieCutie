@@ -5789,7 +5789,7 @@ function autoDraftReorderIfNeeded(item){
     lineItems:[{product:item.name, qty:suggestedQty, unitPrice}],
     createdDate:APP_TODAY, requestedDeliveryDate:'', deliveryAddress: myBusiness ? (savedBuyerAddresses[0]||'') : 'Dela Cruz Hardware, Marikina City', notes:'Auto-drafted — '+item.name+' hit its restock level.',
     shipping:null, customs:null, invoice:null, counter:null, deliveryConfirmation:null, atRisk:false, riskNote:'',
-    history:[{date:APP_TODAY, time:'Just now', actor:'buyer', action:'Draft auto-created — '+item.name+' hit its restock level'}],
+    history:[{date:APP_TODAY, time:'Just now', actor:'buyer', action:'Draft auto-created — '+item.name+' hit its restock level', actorMemberId: myBusiness ? null : undefined}],
   };
   purchaseOrders.push(newPO);
   syncPoToSupabase(newPO); // without this, a real account's auto-drafted reorder never reached Supabase and vanished on reload
@@ -10025,7 +10025,7 @@ function submitRmaReplacement(id){
     notes: 'No-charge replacement for '+po.poNumber+' — see original order for the return/dispute reason.',
     shipping:null, customs: po.type==='freight' ? {hsCode:'', broker:'', clearanceStatus:'pending_documents', dutiesEstimate:0} : null,
     invoice:null, counter:null, deliveryConfirmation:null, atRisk:false, riskNote:'', replacesPoId: po.id,
-    history:[{date:APP_TODAY, time:'Just now', actor:'supplier', action:'Created as a no-charge replacement for '+po.poNumber}],
+    history:[{date:APP_TODAY, time:'Just now', actor:'supplier', action:'Created as a no-charge replacement for '+po.poNumber, actorMemberId: myBusiness ? currentUserId : undefined}],
   };
   purchaseOrders.push(replacementPO);
   syncPoToSupabase(replacementPO); // this is a brand-new order, not a change to `po` — poLogHistory below only syncs `po` itself
@@ -10393,7 +10393,7 @@ function generateNextRecurringDraft(id){
     lineItems: JSON.parse(JSON.stringify(po.lineItems)),
     createdDate: APP_TODAY, requestedDeliveryDate:'', deliveryAddress: po.deliveryAddress, notes: 'Auto-drafted from recurring order '+po.poNumber,
     shipping:null, customs:null, invoice:null, counter:null, deliveryConfirmation:null, atRisk:false, riskNote:'',
-    history:[{date:APP_TODAY, time:'Just now', actor:'buyer', action:'Draft auto-created from recurring order '+po.poNumber}],
+    history:[{date:APP_TODAY, time:'Just now', actor:'buyer', action:'Draft auto-created from recurring order '+po.poNumber, actorMemberId: myBusiness ? null : undefined}],
   };
   purchaseOrders.push(newPO);
   syncPoToSupabase(newPO); // without this, a real account's auto-drafted next cycle never reached Supabase and vanished on reload
@@ -11766,7 +11766,7 @@ function saveCreatePO(sendNow){
       // the customs classification yet," which is the honest state, not a guessed one.
       shipping:null, customs: type==='freight' ? {hsCode:'', broker:'', clearanceStatus:'pending_documents', dutiesEstimate:0} : null,
       invoice:null, counter:null, deliveryConfirmation:null, atRisk:false, riskNote:'',
-      history:[{date:APP_TODAY, time:'9:45 AM', actor:'buyer', action:'Draft created'}],
+      history:[{date:APP_TODAY, time:'9:45 AM', actor:'buyer', action:'Draft created', actorMemberId: myBusiness ? currentUserId : undefined}],
     };
     purchaseOrders.push(newPO);
     // poLogHistory (the usual sync chokepoint) isn't called here since the history entry above
@@ -11799,7 +11799,7 @@ function createDraftPOObject({supplierId, lineItems, type, notes, requestedDeliv
     deliveryAddress: deliveryAddress || (savedBuyerAddresses[0] || ''), notes: notes || '',
     shipping:null, customs: type==='freight' ? {hsCode:'', broker:'', clearanceStatus:'pending_documents', dutiesEstimate:0} : null,
     invoice:null, counter:null, deliveryConfirmation:null, atRisk:false, riskNote:'',
-    history:[{date:APP_TODAY, time:'Just now', actor:'buyer', action:'Draft created'}],
+    history:[{date:APP_TODAY, time:'Just now', actor:'buyer', action:'Draft created', actorMemberId: myBusiness ? currentUserId : undefined}],
   };
   purchaseOrders.push(newPO);
   return newPO;
@@ -11997,7 +11997,7 @@ function submitPartialConfirm(id){
     notes: 'Backorder — the remaining quantity from '+po.poNumber+' that could not be fulfilled at the time.',
     shipping:null, customs: po.type==='freight' ? {hsCode:'', broker:'', clearanceStatus:'pending_documents', dutiesEstimate:0} : null,
     invoice:null, counter:null, deliveryConfirmation:null, atRisk:false, riskNote:'', backorderFromPoId: po.id,
-    history:[{date:APP_TODAY, time:'Just now', actor:'supplier', action:'Created as a backorder from '+po.poNumber}],
+    history:[{date:APP_TODAY, time:'Just now', actor:'supplier', action:'Created as a backorder from '+po.poNumber, actorMemberId: myBusiness ? currentUserId : undefined}],
   };
   po.backorderPoId = backorderId;
   poLogHistory(po, 'supplier', 'Confirmed partial quantities — ' + shortfall.map(s=>s.product+' short by '+s.qty).join(', '));
@@ -13434,7 +13434,7 @@ async function acceptRfqQuote(id){
     lineItems:rfq.items.map(i=>({product:i.product, qty:i.qty, unitPrice:rfq.quote.unitPrice})),
     createdDate: today, requestedDeliveryDate:rfq.neededByDate, deliveryAddress: myBusiness ? (savedBuyerAddresses[0]||'') : 'Dela Cruz Hardware, Marikina City', notes:'Created from accepted quote '+rfq.rfqNumber,
     shipping:null, customs:null, invoice:null, counter:null, deliveryConfirmation:null, atRisk:false, riskNote:'',
-    history:[{date: today, actor:'buyer', action:'Draft created from accepted RFQ '+rfq.rfqNumber}],
+    history:[{date: today, actor:'buyer', action:'Draft created from accepted RFQ '+rfq.rfqNumber, actorMemberId: myBusiness ? currentUserId : undefined}],
   };
   purchaseOrders.push(newPO);
   syncPoToSupabase(newPO); // the RFQ update above only synced the RFQ row itself — this is a brand-new PO
@@ -20268,7 +20268,12 @@ function applyNiftiPersistedState(s){
   termsOfTrade = s.termsOfTrade || termsOfTrade;
   relationshipNotes = s.relationshipNotes || relationshipNotes;
   currentAppRole = s.currentAppRole || currentAppRole;
-  currentUserId = s.currentUserId || currentUserId;
+  // Real accounts: loadMyBusinessContext() already set currentUserId authoritatively from the
+  // signed-in team_members row (tm.id), keyed to Supabase auth — restoring it from local storage
+  // here would risk silently applying a DIFFERENT teammate's id on a shared device, since
+  // NIFTI_STORAGE_KEY is scoped per-business, not per-member. Only demo mode (no real business)
+  // has no such authoritative source, so only demo mode restores it from storage.
+  if(!myBusiness) currentUserId = s.currentUserId || currentUserId;
   currentLanguage = s.currentLanguage || currentLanguage;
 
   if((!myBusiness || supplySyncDirty) && s.supplyData){ supplyData.length = 0; supplyData.push(...s.supplyData); } // see inventoryData above
