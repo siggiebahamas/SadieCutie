@@ -3133,6 +3133,10 @@ async function loadMyBusinessContext(){
   currentAppRole = myBusiness.type; // 'buyer' or 'supplier' — fixed by the account, not togglable
   currentUserId = tm.id;
   if(myBusiness.type === 'buyer') ME_BUYER = myBusiness.id; else ME_SUPPLIER = myBusiness.id;
+  // approvalThreshold used to live in local storage only — never reached a teammate's own device,
+  // so the spending-approval control was silently bypassed for anyone not on the device that set
+  // it. myBusiness already carries this column from the businesses(*) join above.
+  approvalThreshold = myBusiness.approval_threshold != null ? Number(myBusiness.approval_threshold) : null;
   // Scope local persistence to this business — see the note on NIFTI_STORAGE_KEY's declaration.
   // Whatever bootNifti()/loadNiftiState() already loaded under the demo key before this ran gets
   // replaced below by this business's own saved copy, if it has one.
@@ -3304,6 +3308,7 @@ async function mapPoRowToJs(row){
     codPayment: row.cod_payment, salesInvoiceRecord: row.sales_invoice_record, amendments: row.amendments,
     backorderPoId: row.backorder_po_id, replacesPoId: row.replaces_po_id, backorderFromPoId: row.backorder_from_po_id,
     freightMilestones: row.freight_milestones || undefined,
+    pendingApproval: row.pending_approval || null,
   };
 }
 
@@ -3324,6 +3329,7 @@ function mapPoJsToRow(po){
     cod_payment: po.codPayment || null, sales_invoice_record: po.salesInvoiceRecord || null, amendments: po.amendments || null,
     backorder_po_id: po.backorderPoId || null, replaces_po_id: po.replacesPoId || null, backorder_from_po_id: po.backorderFromPoId || null,
     freight_milestones: po.freightMilestones || null,
+    pending_approval: po.pendingApproval || null,
   };
 }
 
@@ -3937,7 +3943,17 @@ function subscribeToConversations(){
     if(!row) return;
     const conv = getConversations().find(c=>c.conversationRowId===row.id);
     if(!conv) { loadMyConversations().then(()=>{ renderConversationList(); }); return; } // a brand-new conversation (e.g. an invite just got accepted) — reload the list to pick it up
-    conv.unread = myBusiness.type === 'buyer' ? row.buyer_unread_count : row.supplier_unread_count;
+    if(activeConvId === conv.id){
+      // This thread is open right now — sendRealMessage's increment_conversation_unread RPC has
+      // no way to know that, so the row this payload carries reflects an increment from BEFORE we
+      // had a chance to mark it read. Without this branch, the badge/unread-dot would show this
+      // actively-open thread as unread every single time a message arrives in it, until the user
+      // navigates away and back. Keep it at 0 locally and correct the server row to match.
+      conv.unread = 0;
+      markConversationReadRemote(conv);
+    } else {
+      conv.unread = myBusiness.type === 'buyer' ? row.buyer_unread_count : row.supplier_unread_count;
+    }
     renderConversationList();
     updateMessagesBadge();
   };
@@ -8192,7 +8208,7 @@ function renderApprovalThresholdSettings(){
     el.innerHTML = `<div style="font-size:15px;color:var(--ink);">${approvalThreshold!==null ? 'Orders over '+fmtPHP(approvalThreshold)+' need Owner approval.' : 'No threshold set — only an Owner can set one.'}</div>`;
   }
 }
-function saveApprovalThreshold(){
+async function saveApprovalThreshold(){
   if(!getCurrentUserRoles().includes('Owner')){ showToast('Only an Owner can change this.'); return; }
   const input = document.getElementById('approvalThresholdInput');
   const raw = input.value.trim();
@@ -8201,6 +8217,13 @@ function saveApprovalThreshold(){
   approvalThreshold = val;
   showToast(val ? `Orders over ${fmtPHP(val)} now need approval.` : 'Spending approval threshold removed.', 'success');
   scheduleNiftiSave();
+  // Without this, the threshold only ever lived in this one browser's local storage — a teammate
+  // creating a large order from their own device would never see it, and the approval control
+  // would be silently bypassed simply because the policy never reached them.
+  if(myBusiness){
+    const { error } = await sb.from('businesses').update({ approval_threshold: val }).eq('id', myBusiness.id);
+    if(error) console.warn('Approval threshold sync failed:', error.message);
+  }
 }
 // ============ TEAM COORDINATION (tasks, activity feed, chat, handoff notes, workload) ============
 // This is deliberately separate from everything order-shaped — a "call the electrician" or
@@ -20417,7 +20440,11 @@ function applyNiftiPersistedState(s){
   sharedContact = s.sharedContact || sharedContact;
   priceProtectionTally = s.priceProtectionTally || priceProtectionTally;
   currencyDisplayPref = s.currencyDisplayPref || currencyDisplayPref;
-  approvalThreshold = (s.approvalThreshold !== undefined) ? s.approvalThreshold : approvalThreshold;
+  // Real accounts: loadMyBusinessContext() already set this authoritatively from
+  // businesses.approval_threshold — restoring from local storage here (this device's possibly
+  // stale last-saved copy) would silently override a value another teammate changed since. Same
+  // fix as currentUserId above.
+  if(!myBusiness) approvalThreshold = (s.approvalThreshold !== undefined) ? s.approvalThreshold : approvalThreshold;
   teamTasks = s.teamTasks || teamTasks;
   teamActivityLog = s.teamActivityLog || teamActivityLog;
   teamChatMessages = s.teamChatMessages || teamChatMessages;
