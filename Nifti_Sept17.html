@@ -2236,10 +2236,6 @@
         </div>
         <div id="buyerTodayPanel"></div>
         <div id="priceProtectionCard"></div>
-        <div class="panel-card" style="margin-bottom:20px;">
-          <div class="panel-head"><h2>Top priorities</h2><span class="lnk" onclick="navigate('analytics')">See more in Analytics →</span></div>
-          <div id="buyerDecisionCenterList"></div>
-        </div>
         <div class="stat-row">
           <div class="stat-card neutral">
             <div class="stat-body"><span class="stat-label">Active Orders</span><div class="stat-num" id="dcStatActiveOrders">—</div></div>
@@ -2259,15 +2255,24 @@
           </div>
         </div>
 
+        <!-- "Top priorities" (insight-driven) and "Needs attention" (inbox-driven) used to be two
+             separate panels doing the same job — telling you what needs action — sourced from two
+             different systems with two different visual languages. Merged under one heading so
+             there's exactly one place to look for "what do I need to do." Neither list's own
+             rendering logic changed, just where it lives. -->
+        <div class="panel-card" style="margin-bottom:20px;">
+          <div class="panel-head"><h2>Needs your attention</h2><span class="lnk" onclick="navigate('analytics')">See more in Analytics →</span></div>
+          <div id="buyerDecisionCenterList"></div>
+          <div id="buyerInboxList" style="margin-top:10px;"></div>
+        </div>
+
         <div class="grid2">
-          <div class="panel-card">
-            <div class="panel-head"><h2>Needs attention</h2><span class="lnk" onclick="navigate('orders')">View all orders →</span></div>
-            <div id="buyerInboxList"></div>
-          </div>
           <div class="panel-card">
             <div class="panel-head"><h2>Order pipeline — all POs</h2></div>
             <div id="buyerPipelineBox"></div>
-            <div class="panel-head" style="margin-top:26px;"><h2>Recent activity</h2></div>
+          </div>
+          <div class="panel-card">
+            <div class="panel-head"><h2>Recent activity</h2></div>
             <div id="buyerActivityBox"></div>
           </div>
         </div>
@@ -4671,28 +4676,27 @@ function applyRoleAwareText(role){
     : 'Shown to buyers you invite or connect with.';
 }
 
+// Dashboard simplification: growth-CTA banner and the two lower-priority analytics panels
+// (Shipments due this week, Top buyers by volume) sit behind one "Show more" toggle instead of
+// being always-on above the fold — none of it is action-required, so it doesn't need to compete
+// with Messages/Today/Needs your attention for first-glance space. Sticky per page-load since
+// renderSupplierDashboard() only rebuilds this DOM once per session (see window._supplierDashInit).
+let supplierDashMoreExpanded = false;
+function toggleSupplierDashboardMore(){
+  supplierDashMoreExpanded = !supplierDashMoreExpanded;
+  const el = document.getElementById('supplierDashboardMore');
+  const label = document.getElementById('supplierDashMoreLabel');
+  if(el) el.classList.toggle('hidden', !supplierDashMoreExpanded);
+  if(label) label.textContent = supplierDashMoreExpanded ? 'Show less ▲' : 'Show more — shipments due, top buyers, referrals ▼';
+}
 function renderSupplierDashboard(){
   document.getElementById('supplierDashboardView').innerHTML = `
     <div class="page-head"><h1 data-i18n="dash_greeting_sup">Good morning, ${myBusiness ? myBusiness.name : 'Metro Steel Co.'}</h1><p data-i18n="dash_sub">Here's what needs your attention today.</p></div>
-    <!-- Section 7 #8 — referral/growth loop, treated as a headline feature: a supplier who
-         joined via a buyer's invite gets the exact same free, no-friction invite flow to bring
-         in their own customers. -->
-    <div style="background:var(--green-soft);border:1.5px solid var(--green);border-radius:14px;padding:18px 20px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
-      <div>
-        <div style="font-weight:800;font-size:16px;color:var(--green-hover);">Bring your own customers onto Nifti too</div>
-        <div style="font-size:15px;color:var(--ink);margin-top:2px;">Same free, no-friction invite you got — no listing fees, no exposure to competitors, ever. <span class="row-action" onclick="navigate('settings')">Track your referral rewards →</span></div>
-      </div>
-      <button class="btn btn-primary" onclick="navigate('invite')">Invite your own customers →</button>
-    </div>
     <div class="panel-card" style="margin-bottom:20px;">
       <div class="panel-head"><h2>💬 Messages</h2><span class="lnk" onclick="navigate('messages')">Open Messages →</span></div>
       <div id="supplierRecentMessagesBox"></div>
     </div>
     <div id="supplierTodayPanel"></div>
-    <div class="panel-card" style="margin-bottom:20px;">
-      <div class="panel-head"><h2>Top priorities</h2><span class="lnk" onclick="navigate('analytics')">See more in Analytics →</span></div>
-      <div id="supplierDecisionCenterList"></div>
-    </div>
     <div class="stat-row">
       <div class="stat-card red">
         <div class="stat-body"><span class="stat-label">New Purchase Requests</span><div class="stat-num" id="supplierNewRequestsStat">3</div></div>
@@ -4712,20 +4716,48 @@ function renderSupplierDashboard(){
       </div>
     </div>
 
+    <!-- Same merge as the buyer dashboard: "Top priorities" and "Needs your action" were two
+         panels doing the same job from two different data sources. One heading now. -->
+    <div class="panel-card" style="margin-bottom:20px;">
+      <div class="panel-head"><h2>Needs your attention</h2><span class="lnk" onclick="navigate('analytics')">See more in Analytics →</span></div>
+      <div id="supplierDecisionCenterList"></div>
+      <div id="supplierInboxList" style="margin-top:10px;"></div>
+    </div>
+
     <div class="grid2">
-      <div class="panel-card">
-        <div class="panel-head"><h2>Needs your action</h2><span class="lnk" onclick="navigate('analytics')">View analytics →</span></div>
-        <div id="supplierInboxList"></div>
-      </div>
       <div class="panel-card">
         <div class="panel-head"><h2>Order fulfillment — all active POs</h2></div>
         <div id="supplierPipelineBox"></div>
-        <div class="panel-head" style="margin-top:22px;"><h2>Shipments due this week</h2></div>
-        <div id="supplierShipmentsDueBox"></div>
-        <div class="panel-head" style="margin-top:22px;"><h2>Top buyers by volume</h2></div>
-        <div id="supplierTopBuyersBox"></div>
-        <div class="panel-head" style="margin-top:22px;"><h2>Recent activity</h2></div>
+      </div>
+      <div class="panel-card">
+        <div class="panel-head"><h2>Recent activity</h2></div>
         <div id="supplierActivityBox"></div>
+      </div>
+    </div>
+
+    <div style="text-align:center;margin:18px 0 4px;">
+      <span class="row-action" id="supplierDashMoreLabel" onclick="toggleSupplierDashboardMore()">Show more — shipments due, top buyers, referrals ▼</span>
+    </div>
+    <div id="supplierDashboardMore" class="hidden">
+      <!-- Section 7 #8 — referral/growth loop: a supplier who joined via a buyer's invite gets
+           the exact same free, no-friction invite flow to bring in their own customers. Not
+           action-required, so it's here rather than above Messages/Today on first paint. -->
+      <div style="background:var(--green-soft);border:1.5px solid var(--green);border-radius:14px;padding:18px 20px;margin:16px 0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+        <div>
+          <div style="font-weight:800;font-size:16px;color:var(--green-hover);">Bring your own customers onto Nifti too</div>
+          <div style="font-size:15px;color:var(--ink);margin-top:2px;">Same free, no-friction invite you got — no listing fees, no exposure to competitors, ever. <span class="row-action" onclick="navigate('settings')">Track your referral rewards →</span></div>
+        </div>
+        <button class="btn btn-primary" onclick="navigate('invite')">Invite your own customers →</button>
+      </div>
+      <div class="grid2">
+        <div class="panel-card">
+          <div class="panel-head"><h2>Shipments due this week</h2></div>
+          <div id="supplierShipmentsDueBox"></div>
+        </div>
+        <div class="panel-card">
+          <div class="panel-head"><h2>Top buyers by volume</h2></div>
+          <div id="supplierTopBuyersBox"></div>
+        </div>
       </div>
     </div>
   `;
