@@ -3371,6 +3371,25 @@ async function retryPendingPOs(){
   if(!myBusiness || isOffline) return;
   for(const po of purchaseOrders.filter(p=>p._pendingSync)) await syncPoToSupabase(po);
 }
+// Sales Invoice / Delivery Receipt / Credit Note numbers are legally-significant sequential BIR
+// serials. For a real account, the next number comes from a single atomic server-side sequence
+// shared by every device (see the next_document_number() Postgres function) — without this, a
+// second device/session (a teammate's laptop, a cleared cache) started back at the same local
+// defaults and could issue a DUPLICATE required serial the moment it generated its first
+// document. Demo mode has no backend at all, so it keeps using the plain local counter, via
+// localIncrementFn — which is also the fallback if the RPC call itself fails (e.g. offline);
+// that residual case can still collide if two devices go offline at once, but it's strictly
+// better than always using local-only counters as this used to.
+async function getNextDocumentNumber(counterType, start, localIncrementFn){
+  if(myBusiness){
+    try{
+      const { data, error } = await sb.rpc('next_document_number', {p_business_id: myBusiness.id, p_counter_type: counterType, p_start: start});
+      if(!error && data != null) return data;
+      console.warn('next_document_number RPC failed for', counterType, '—', error && error.message);
+    }catch(e){ console.warn('next_document_number RPC failed for', counterType, '—', e); }
+  }
+  return localIncrementFn();
+}
 
 async function loadRealPurchaseOrders(){
   if(!myBusiness) return;
@@ -10130,7 +10149,7 @@ function openRmaOutcomeForm(id, outcome){
     </div>`;
   }
 }
-function submitRmaCreditNote(id){
+async function submitRmaCreditNote(id){
   if(!requirePermission('markInvoicePaid')) return;
   const po = getPO(id);
   const amount = Number(document.getElementById('rmaCreditAmount_'+id).value);
@@ -10140,8 +10159,7 @@ function submitRmaCreditNote(id){
     if(amount > balance){ markFieldInvalid('rmaCreditAmount_'+id, 'This is more than the remaining balance ('+fmtPHP(balance)+') — a credit note can\'t exceed what\'s actually owed.'); return; }
   }
   const profile = taxProfiles.supplier;
-  const cnNumber = profile.nextCnNumber;
-  profile.nextCnNumber += 1;
+  const cnNumber = await getNextDocumentNumber('credit_note', 1, () => { const n = profile.nextCnNumber; profile.nextCnNumber += 1; return n; });
   snapshotPO(po);
   po._undoLabel = 'Credit note issued.';
   po.rma.status = 'resolved';
@@ -10336,7 +10354,7 @@ function closeDocPreview(){
 }
 function printDocPreview(){ window.print(); }
 // Section 7 #12 — "Generate Delivery Receipt" on the Delivered milestone: a simple digital DR.
-function generateDeliveryReceipt(id){
+async function generateDeliveryReceipt(id){
   const po = getPO(id);
   // Same "assign once, freeze forever" numbering as the Sales Invoice — a DR number has to
   // stay fixed to one delivery, not drift each time it's reprinted. Same entitlement gate too:
@@ -10345,8 +10363,7 @@ function generateDeliveryReceipt(id){
   if(!po.deliveryReceiptNumber){
     if(!requireBirDocumentsEntitlement()) return;
     const profile = taxProfiles.supplier;
-    po.deliveryReceiptNumber = profile.nextDrNumber;
-    profile.nextDrNumber += 1;
+    po.deliveryReceiptNumber = await getNextDocumentNumber('delivery_receipt', 1, () => { const n = profile.nextDrNumber; profile.nextDrNumber += 1; return n; });
     scheduleNiftiSave();
   }
   const dc = po.deliveryConfirmation;
@@ -10422,15 +10439,14 @@ function generateReceipt(id){
 // the same seller-registration snapshot, rather than pulling live Settings or incrementing the
 // series again. That's what makes a real invoice number usable for BIR purposes: it has to
 // refer to one fixed transaction forever, not drift if Settings changes afterward.
-function generateSalesInvoice(id){
+async function generateSalesInvoice(id){
   const po = getPO(id);
   if(!po.invoice){ showToast('Issue the invoice for this order first.'); return; }
   if(!po.salesInvoiceRecord){
     if(!requireBirDocumentsEntitlement()) return;
     if(!requirePermission('markInvoicePaid')) return; // no dedicated permission key for this yet — finance-adjacent, reuses the closest existing one
     const profile = taxProfiles.supplier; // the supplier is always the seller of record in this model
-    const seriesNumber = profile.nextSiNumber;
-    profile.nextSiNumber += 1;
+    const seriesNumber = await getNextDocumentNumber('sales_invoice', 1, () => { const n = profile.nextSiNumber; profile.nextSiNumber += 1; return n; });
     const vatable = poLineTotal(po) + poDuty(po);
     const vatAmount = profile.vatStatus==='vat' ? poTax(po) : 0;
     po.salesInvoiceRecord = {
