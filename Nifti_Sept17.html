@@ -5790,7 +5790,7 @@ function invCancel(){
   invExpandedCode = null; invExpandedMode = null;
   renderInventoryTable();
 }
-function invSubmitReorder(code){
+async function invSubmitReorder(code){
   if(!requirePermission('reorderStock')) return;
   // This is the manual, user-clicked "one-click reorder" — the Essential-tier feature the
   // pricing page promises. It was gated by the Growth-tier auto-replenishment check instead,
@@ -5826,7 +5826,7 @@ function invSubmitReorder(code){
     msgText = `✓ Updated — draft ${po.poNumber} now requests ${qty} units.`;
   } else {
     const unitPrice = lookupKnownUnitPrice(supplierId, item.name);
-    const newPO = createDraftPOObject({ supplierId, lineItems:[{product:item.name, qty, unitPrice}], requestedDeliveryDate: date, notes:'' });
+    const newPO = await createDraftPOObject({ supplierId, lineItems:[{product:item.name, qty, unitPrice}], requestedDeliveryDate: date, notes:'' });
     if(!newPO){ item.reorderConfirmMsg = {text:'Could not create a draft — please try again.', color:'var(--danger)'}; renderInventoryTable(); return; }
     item.reorderDraftPoId = newPO.id;
     poLogHistory(newPO, 'buyer', 'Draft created from Inventory reorder');
@@ -5959,7 +5959,7 @@ function removeEditBatch(code, idx){
 // Automation #3 — the moment something crosses into "Reorder Now," a draft PO is prepared
 // automatically so there's nothing to build from scratch. It's never sent without a human
 // actually reviewing and hitting Send — this only saves the busywork of drafting it.
-function autoDraftReorderIfNeeded(item){
+async function autoDraftReorderIfNeeded(item){
   if(item.status !== 'critical') return;
   // Fires implicitly from background logic (adding/editing an inventory item), not a direct
   // click — a real entitlement gate, but checked directly rather than via
@@ -5976,7 +5976,7 @@ function autoDraftReorderIfNeeded(item){
   const suggestedQty = Math.max(1, (item.maxLevel || item.rop*3) - item.onHand);
   const agreed = findAgreedPrice(supplierEntry.id, item.name, suggestedQty);
   const unitPrice = agreed ? agreed.price : 0;
-  const poNumber = issuePoNumber();
+  const poNumber = await issuePoNumber();
   const newPO = {
     id:newPoId(), poNumber,
     buyerId:ME_BUYER, buyerName: myBusiness ? myBusiness.name : 'Dela Cruz Hardware', supplierId:supplierEntry.id, supplierName:supplierEntry.name,
@@ -7326,7 +7326,17 @@ function exportInvoicesToCsv(side){
   orders.forEach(o => rows.push([o.poNumber, o.invoice.number, o.invoice.status, poTotal(o), o.invoice.dueDate]));
   downloadCsv(`nifti-invoices-${side}-${APP_TODAY}.csv`, rows);
 }
-function issuePoNumber(){
+// For a real account, the next PO number comes from a global atomic Postgres sequence
+// (next_po_number(), already defined server-side and callable via RPC) instead of this device's
+// own local counter — without this, a second device/session started back at the same local
+// default and could hand out a PO number a different real order already has. Demo mode (and the
+// fallback if the RPC call itself fails) keeps the original local counter.
+async function issuePoNumber(){
+  if(myBusiness){
+    const { data, error } = await sb.rpc('next_po_number');
+    if(!error && data) return data;
+    console.warn('next_po_number RPC failed —', error && error.message, '— falling back to local counter');
+  }
   poIdCounter++;
   return 'PO-2026-0'+(870+poIdCounter);
 }
@@ -10223,12 +10233,11 @@ async function submitRmaCreditNote(id){
   showToast(`Credit Note CN-${String(cnNumber).padStart(6,'0')} issued for ${fmtPHP(amount)}.`, 'success');
   scheduleNiftiSave();
 }
-function submitRmaReplacement(id){
+async function submitRmaReplacement(id){
   if(!requirePermission('markInvoicePaid')) return; // creates a real, no-charge fulfillment obligation — same financial-action gate as its sibling submitRmaCreditNote
   const po = getPO(id);
   const newId = newPoId();
-  poIdCounter++;
-  const poNumber = issuePoNumber();
+  const poNumber = await issuePoNumber();
   const replacementPO = {
     id:newId, poNumber, buyerId:po.buyerId, buyerName:po.buyerName, supplierId:po.supplierId, supplierName:po.supplierName,
     type: po.type, status:'confirmed', currency:'PHP', taxRate:po.taxRate,
@@ -10592,9 +10601,9 @@ function cancelRecurring(id){
 }
 // Simulates the auto-draft that would fire on the next cycle — a real backend would run this on
 // a schedule; here it's a one-tap trigger since the prototype has no passage of real time.
-function generateNextRecurringDraft(id){
+async function generateNextRecurringDraft(id){
   const po = getPO(id);
-  const poNumber = issuePoNumber();
+  const poNumber = await issuePoNumber();
   const newPO = {
     id:newPoId(), poNumber,
     buyerId: po.buyerId, buyerName: po.buyerName, supplierId: po.supplierId, supplierName: po.supplierName,
@@ -10669,10 +10678,10 @@ function confirmSavePoAsTemplate(id){
 // quantities as last time, fully editable before sending, and never touches the original order.
 // Opens straight into the normal Create/Edit PO screen so adjusting quantities or adding one more
 // item before sending is just the same form everyone already knows, not a separate flow.
-function reorderFromPO(id){
+async function reorderFromPO(id){
   if(!requireReorderToolsEntitlement()) return;
   const po = getPO(id);
-  const newPO = createDraftPOObject({
+  const newPO = await createDraftPOObject({
     supplierId: po.supplierId,
     lineItems: po.lineItems.map(li => ({product: li.product, qty: li.qty, unitPrice: li.unitPrice})),
     type: po.type,
@@ -11975,7 +11984,7 @@ function resetPriceConfirmButton(){
   btn.style.cursor = '';
   btn.style.opacity = '';
 }
-function saveCreatePO(sendNow){
+async function saveCreatePO(sendNow){
   saveNewAddressIfNeeded();
   const supplierId = document.getElementById('createPoSupplier').value;
   const supplier = suppliersData.find(s=>s.id===supplierId);
@@ -11995,7 +12004,7 @@ function saveCreatePO(sendNow){
     if(sendNow){ closeCreatePOModal(); openSendConfirmModal(editingPOId); return; }
     else { poLogHistory(po,'buyer','Draft updated'); renderOrdersTable(); }
   } else {
-    const poNumber = issuePoNumber(); // server-issued — see issuePoNumber() above
+    const poNumber = await issuePoNumber();
     const newPO = {
       id:newPoId(), poNumber,
       buyerId:ME_BUYER, buyerName: myBusiness ? myBusiness.name : 'Dela Cruz Hardware', supplierId, supplierName:supplier.name,
@@ -12026,10 +12035,10 @@ function saveCreatePO(sendNow){
 // Produces the exact same object shape saveCreatePO's own "new draft" branch does, so every
 // existing draft/edit/send/render code path treats one of these identically to a manually
 // created draft — nothing downstream needs to know the difference.
-function createDraftPOObject({supplierId, lineItems, type, notes, requestedDeliveryDate, deliveryAddress}){
+async function createDraftPOObject({supplierId, lineItems, type, notes, requestedDeliveryDate, deliveryAddress}){
   const supplier = suppliersData.find(s=>s.id===supplierId);
   if(!supplier) return null;
-  const poNumber = issuePoNumber();
+  const poNumber = await issuePoNumber();
   const newPO = {
     id:newPoId(), poNumber,
     buyerId:ME_BUYER, buyerName: myBusiness ? myBusiness.name : 'Dela Cruz Hardware', supplierId, supplierName:supplier.name,
@@ -12197,7 +12206,7 @@ function openPartialConfirmForm(id){
     <button class="btn btn-primary" style="margin-top:10px;" onclick="event.stopPropagation(); submitPartialConfirm('${id}')">Confirm at these quantities →</button>
   </div>`;
 }
-function submitPartialConfirm(id){
+async function submitPartialConfirm(id){
   const po = getPO(id);
   const confirmedQtys = po.lineItems.map((li,i)=>{
     const input = document.getElementById('partialQty_'+id+'_'+i);
@@ -12227,8 +12236,7 @@ function submitPartialConfirm(id){
   // (and po.backorderPoId set) BEFORE poLogHistory syncs `po` below, so that sync's upload of `po`
   // already carries the link to the new backorder instead of writing it one sync behind.
   const backorderId = newPoId();
-  poIdCounter++;
-  const backorderNumber = issuePoNumber();
+  const backorderNumber = await issuePoNumber();
   const backorderPO = {
     id:backorderId, poNumber:backorderNumber, buyerId:po.buyerId, buyerName:po.buyerName, supplierId:po.supplierId, supplierName:po.supplierName,
     type:po.type, status:'sent', currency:'PHP', taxRate:po.taxRate,
@@ -13667,7 +13675,7 @@ async function acceptRfqQuote(id){
   rfq.status = 'accepted';
   rfq.history = newHistory;
   const supplier = suppliersData.find(s=>s.id===rfq.supplierId);
-  const poNumber = issuePoNumber();
+  const poNumber = await issuePoNumber();
   const newPO = {
     id:newPoId(), poNumber,
     buyerId: myBusiness ? myBusiness.id : ME_BUYER, buyerName: myBusiness ? myBusiness.name : 'Dela Cruz Hardware', supplierId:rfq.supplierId, supplierName:supplier.name,
@@ -17753,7 +17761,7 @@ function lookupKnownUnitPrice(supplierId, productName){
   if(pastOrder){ const li = pastOrder.lineItems.find(li=>li.product.toLowerCase()===productName.toLowerCase()); if(li) return li.unitPrice; }
   return 0;
 }
-function quickReorderFromInsight(code){
+async function quickReorderFromInsight(code){
   if(!requirePermission('reorderStock')) return false;
   if(!requireAutoReplenishmentEntitlement()) return false;
   const item = inventoryData.find(i=>i.code===code);
@@ -17763,7 +17771,7 @@ function quickReorderFromInsight(code){
   const qty = Math.max(Math.round(item.rop*2 - item.onHand), item.rop || 10);
   const date = new Date(new Date(APP_TODAY).getTime() + (item.leadTime||5)*86400000).toISOString().slice(0,10);
   const unitPrice = lookupKnownUnitPrice(supplierId, item.name);
-  const newPO = createDraftPOObject({
+  const newPO = await createDraftPOObject({
     supplierId, lineItems:[{product:item.name, qty, unitPrice}],
     requestedDeliveryDate: date, notes: 'Auto-drafted by Nifti — inventory was running low.',
   });
@@ -17787,13 +17795,13 @@ function quickReorderFromInsight(code){
 // Center's Insights tab) — action buttons reference a surface+index instead of embedding the
 // whole insight object (with potentially quote-breaking text) into an HTML attribute.
 let _insightItemsBySurface = {};
-function runInsightAction(surfaceId, idx){
+async function runInsightAction(surfaceId, idx){
   const ins = (_insightItemsBySurface[surfaceId]||[])[idx];
   if(!ins || !ins.actionData) return;
   const d = ins.actionData;
   let ok = false;
   if(d.kind === 'transfer') ok = executeInternalTransfer(d.fromCode, d.toCode, d.qty);
-  else if(d.kind === 'reorder') ok = quickReorderFromInsight(d.code);
+  else if(d.kind === 'reorder') ok = await quickReorderFromInsight(d.code);
   else if(d.kind === 'resolveIssue'){ dismissDataQualityIssue(d.issueId, 'Resolved from insight'); ok = true; }
   if(ok) dismissInsight(ins);
   refreshAllInsightSurfaces();
