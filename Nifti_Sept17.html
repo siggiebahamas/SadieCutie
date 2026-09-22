@@ -165,6 +165,26 @@
   .orders-table-scroll .orders-table{border:none;border-radius:0;overflow:visible;}
   .orders-table-scroll .orders-table thead th{position:sticky;top:0;z-index:5;}
   .orders-table tr.order-row-selected td{background:var(--green-soft);}
+  /* A horizontally-scrolling table with 5-6 columns is a known bad pattern on a phone — hard to
+     scan, easy to accidentally scroll instead of tap. Below 640px (the same breakpoint every other
+     "full mobile pass" rule in this file uses), the Orders & Freight table hands off to a stacked
+     card list carrying the exact same data and the same tap-to-open-detail interaction; above that
+     breakpoint the table stays exactly as it was. Both are always rendered — this is CSS-only
+     visibility, no separate re-render on resize. */
+  .po-card-list{display:none;}
+  .po-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;cursor:pointer;}
+  .po-card.order-row-selected{background:var(--green-soft);border-color:var(--green);}
+  .po-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;}
+  .po-card-number{font-weight:800;font-size:16px;color:var(--ink);}
+  .po-card-status{font-size:12.5px;color:var(--ink);opacity:.65;font-weight:600;margin-top:2px;}
+  .po-card-row{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:15px;color:var(--ink);padding:3px 0;}
+  .po-card-row .k{opacity:.65;}
+  .po-card-row .v{font-weight:700;text-align:right;}
+  .po-card-action{margin-top:8px;}
+  @media (max-width:640px){
+    .orders-table-scroll{display:none;}
+    .po-card-list{display:block;}
+  }
   .orders-sheet-wrap{max-height:0;opacity:0;overflow:hidden;transition:max-height .4s ease, opacity .3s ease;}
   .orders-sheet-wrap.open{max-height:2400px;opacity:1;margin-top:16px;}
   .orders-sheet-inner{background:var(--surface);border:1px solid var(--border-strong,var(--border));border-top:2px solid var(--border);box-shadow:inset 0 4px 14px rgba(24,26,30,.16);border-radius:14px;padding:22px;}
@@ -2415,6 +2435,7 @@
           <tbody id="orderRows"></tbody>
         </table>
         </div>
+        <div class="po-card-list" id="orderCards"></div>
         <div style="font-size:15px;color:var(--ink);margin-top:10px;">⚠ <span style="color:var(--danger);font-weight:700;">red exclamation mark</span> = this order is flagged at risk (running behind schedule, a discrepancy, or something needing your attention).</div>
         </div>
         </div>
@@ -9783,6 +9804,30 @@ function renderOrdersTable(){
         <button class="btn btn-primary" onclick="startCreatePO()">+ Create Purchase Order</button>
       </div></td></tr>`
     : `<tr><td colspan="5" style="text-align:center;color:var(--ink);padding:24px;">No orders match your search or filter.</td></tr>`);
+  const cardsEl = document.getElementById('orderCards');
+  if(cardsEl){
+    cardsEl.innerHTML = rows.map(o=>{
+      const selected = expandedBuyerPoId===o.id;
+      const needsAction = getBuyerActionColorClass(o)==='pill-lowstock';
+      const riskTag = o.atRisk ? `<span style="color:var(--danger);margin-right:5px;" title="Running behind schedule" aria-hidden="true">⏱</span>` : '';
+      return `<div class="po-card ${selected ? 'order-row-selected' : ''}" onclick="toggleOrderRow('${o.id}')">
+        <div class="po-card-top">
+          <div><div class="po-card-number">${riskTag}${o.poNumber}${pendingSyncTagHtml(o)}</div><div class="po-card-status">${PO_STATUS_LABELS[o.status]}</div></div>
+          ${needsAction ? `<span style="width:8px;height:8px;border-radius:50%;background:var(--lowstock-fill);flex-shrink:0;margin-top:6px;"></span>` : ''}
+        </div>
+        <div class="po-card-row"><span class="k">Supplier</span><span class="v">${o.supplierName}</span></div>
+        <div class="po-card-row"><span class="k">Type</span><span class="v"><span class="pipe-tag ${o.type==='freight'?'tag-freight':'tag-local'}">${o.type==='freight'?'Import':'Local'}</span></span></div>
+        <div class="po-card-row"><span class="k">Amount</span><span class="v">${fmtPHP(poTotal(o))}</span></div>
+        <div class="po-card-action">${renderBuyerActionPill(o)}</div>
+      </div>`;
+    }).join('') || (getBuyerPOs().length===0
+      ? `<div style="text-align:center;padding:36px 20px;">
+          <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:6px;">No purchase orders yet</div>
+          <div style="font-size:15.5px;color:var(--ink);margin-bottom:16px;">Once you invite a supplier, you can create your first PO here.</div>
+          <button class="btn btn-primary" onclick="startCreatePO()">+ Create Purchase Order</button>
+        </div>`
+      : `<div style="text-align:center;color:var(--ink);padding:24px;">No orders match your search or filter.</div>`);
+  }
   renderOrderDetailPane();
   updateOpenItemsBadge();
 }
@@ -13374,6 +13419,30 @@ function renderSupplierOrdersTable(){
         <div style="font-size:15.5px;color:var(--ink);">Once a buyer sends you a purchase order, it'll show up here to confirm and fulfill.</div>
       </div></td></tr>`
     : `<tr><td colspan="6" style="text-align:center;color:var(--ink);padding:24px;">No orders match your search or filter.</td></tr>`);
+  const supplierCardsEl = document.getElementById('supplierOrderCards');
+  if(supplierCardsEl){
+    supplierCardsEl.innerHTML = rows.map(o=>{
+      const selected = expandedSupplierOrderPo===o.id;
+      const needsAction = getSupplierActionColorClass(o)==='pill-lowstock';
+      const riskTag = o.atRisk ? `<span style="color:var(--danger);margin-right:5px;" title="Running behind schedule" aria-hidden="true">⏱</span>` : '';
+      const statusCaption = o.status==='delivered' ? PO_STATUS_LABELS[o.status]+' — '+(poDeliveredOnTime(o)?'on time':'late') : PO_STATUS_LABELS[o.status];
+      return `<div class="po-card ${selected ? 'order-row-selected' : ''}" onclick="toggleSupplierOrder('${o.id}')">
+        <div class="po-card-top">
+          <div><div class="po-card-number">${riskTag}${o.poNumber}${pendingSyncTagHtml(o)}</div><div class="po-card-status">${statusCaption}</div></div>
+          ${needsAction ? `<span style="width:8px;height:8px;border-radius:50%;background:var(--lowstock-fill);flex-shrink:0;margin-top:6px;"></span>` : ''}
+        </div>
+        <div class="po-card-row"><span class="k">Buyer</span><span class="v">${o.buyerName}</span></div>
+        <div class="po-card-row"><span class="k">Product</span><span class="v">${o.lineItems[0].product}${o.lineItems.length>1?' +'+(o.lineItems.length-1):''} ×${o.lineItems[0].qty}</span></div>
+        <div class="po-card-row"><span class="k">Promised</span><span class="v">${o.requestedDeliveryDate}</span></div>
+        <div class="po-card-action">${renderSupplierActionPill(o)}</div>
+      </div>`;
+    }).join('') || (getSupplierPOs().filter(o=>o.status!=='draft').length===0
+      ? `<div style="text-align:center;padding:36px 20px;">
+          <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:6px;">No orders yet</div>
+          <div style="font-size:15.5px;color:var(--ink);">Once a buyer sends you a purchase order, it'll show up here.</div>
+        </div>`
+      : `<div style="text-align:center;color:var(--ink);padding:24px;">No orders match your search or filter.</div>`);
+  }
   renderSupplierOrderDetailPane();
   updateOpenItemsBadge();
 }
@@ -13503,6 +13572,7 @@ function renderSupplierFulfillmentDashboard(refreshOnly){
         <tbody id="supplierOrderRows"></tbody>
       </table>
       </div>
+      <div class="po-card-list" id="supplierOrderCards"></div>
       <div style="font-size:15px;color:var(--ink);margin-top:10px;padding:0 4px;">⚠ <span style="color:var(--danger);font-weight:700;">red exclamation mark</span> = this order is flagged at risk (running behind schedule, a discrepancy, or something needing your attention).</div>
     </div>
 
