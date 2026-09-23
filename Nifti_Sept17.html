@@ -1813,7 +1813,7 @@
   <ul style="font-size:15.5px;line-height:1.9;padding-left:22px;margin-bottom:14px;">
     <li><strong>Account &amp; business information</strong> — your name, email, business name and type (buyer/supplier), and the team members you invite.</li>
     <li><strong>Business records</strong> — purchase orders, inventory and stock levels, supplier/buyer relationships, standing price agreements, and messages exchanged with counterparties on the platform.</li>
-    <li><strong>Payment information</strong> — Nifti never stores your card, GCash, or Maya credentials. Payments are processed directly by PayMongo (our payment processor); we store only the transaction result (amount, status, reference number).</li>
+    <li><strong>Payment information</strong> — Nifti does not process payments or hold funds. Buyers pay suppliers directly (GCash, Maya, bank transfer, etc.). We store the payment account details a supplier chooses to show their connected buyers, and the payment records you enter (method, amount, reference number, optional receipt photo). We never ask for or store passwords, PINs, or card numbers.</li>
     <li><strong>Usage data</strong> — basic technical data (browser type, general error logs) to keep the app working correctly.</li>
   </ul>
 
@@ -1823,7 +1823,6 @@
   <h2 style="font-size:20px;margin:22px 0 10px;">Who we share data with</h2>
   <ul style="font-size:15.5px;line-height:1.9;padding-left:22px;margin-bottom:14px;">
     <li><strong>Supabase</strong> — our database and authentication infrastructure provider.</li>
-    <li><strong>PayMongo</strong> — processes GCash/Maya payments; receives only what's needed to process a transaction.</li>
     <li><strong>Your counterparties</strong> — a supplier you send a PO to sees that order's details; a buyer you're connected to sees the pricing and catalog you've shared with them. Nothing is visible to a business you haven't connected with.</li>
   </ul>
   <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">We do not sell your data, and we do not share it with anyone outside the above without your consent or a legal requirement to do so.</p>
@@ -1877,7 +1876,7 @@
   <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">You agree not to use Nifti to commit fraud, misrepresent a business relationship, access data outside your assigned role, or interfere with the platform's normal operation.</p>
 
   <h2 style="font-size:20px;margin:22px 0 10px;">6. Payments</h2>
-  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">Payments made through Nifti (GCash, Maya) are processed by PayMongo, a licensed third-party payment processor. Nifti does not hold or transmit your raw payment credentials. Disputes about a specific transaction may also be subject to PayMongo's own terms.</p>
+  <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">Nifti is not a payment processor and never holds, receives, or transfers money. Buyers pay suppliers directly through their own GCash, Maya, bank, or other accounts. Nifti only records what each business reports: a buyer submits a payment with its reference number, and it counts as paid only after the supplier confirms it arrived. Suppliers are responsible for keeping their listed payment details accurate. Buyers should confirm any recently changed payment details directly with the supplier before sending money. Disputes about a specific payment are between the buyer and supplier, and may also be subject to the terms of the e-wallet or bank used.</p>
 
   <h2 style="font-size:20px;margin:22px 0 10px;">7. Your data</h2>
   <p style="font-size:15.5px;line-height:1.7;margin-bottom:14px;">Your business's records (orders, pricing, inventory, messages) remain yours. Nifti's role is to host and process it on your behalf, not to claim ownership of it.</p>
@@ -2966,6 +2965,12 @@
           <span id="saveConfirm" style="margin-left:12px;font-size:15px;font-weight:700;color:var(--green);"></span>
         </div>
 
+        <div class="settings-card hidden" id="paymentDetailsCard">
+          <h2>💳 How buyers pay you</h2>
+          <div class="sub">Buyers see these accounts when they pay your invoices and deposits. They pay you directly, and Nifti never holds or touches the money. You confirm each payment once you see it in your own account. Only an Owner or General Manager can change these.</div>
+          <div id="paymentDetailsContent"></div>
+        </div>
+
         <div class="settings-card">
           <h2>Tax &amp; BIR registration</h2>
           <div class="sub">Printed onto your Sales Invoices and Delivery Receipts. Nifti doesn't verify any of this with BIR — it's your responsibility to make sure your Authority to Print or CAS accreditation is valid and that you're permitted to issue computerized invoices.</div>
@@ -3389,6 +3394,7 @@ async function mapPoRowToJs(row){
     deliveryConfirmation: row.delivery_confirmation, atRisk: row.at_risk, riskNote: row.risk_note || '',
     history: row.history || [],
     rma: row.rma, assignment: row.assignment, depositPayments: row.deposit_payments,
+    depositRequired: row.deposit_required || undefined,
     codPayment: row.cod_payment, salesInvoiceRecord: row.sales_invoice_record, amendments: row.amendments,
     backorderPoId: row.backorder_po_id, replacesPoId: row.replaces_po_id, backorderFromPoId: row.backorder_from_po_id,
     freightMilestones: row.freight_milestones || undefined,
@@ -3410,6 +3416,7 @@ function mapPoJsToRow(po){
     at_risk: !!po.atRisk, risk_note: po.riskNote || null,
     history: po.history || [],
     rma: po.rma || null, assignment: po.assignment || null, deposit_payments: po.depositPayments || null,
+    deposit_required: po.depositRequired || null,
     cod_payment: po.codPayment || null, sales_invoice_record: po.salesInvoiceRecord || null, amendments: po.amendments || null,
     backorder_po_id: po.backorderPoId || null, replaces_po_id: po.replacesPoId || null, backorder_from_po_id: po.backorderFromPoId || null,
     freight_milestones: po.freightMilestones || null,
@@ -5253,6 +5260,9 @@ const ACTION_PERMISSIONS = {
   cancelOrder:          ['Owner','General Manager','Purchasing Agent','Finance'],
   respondToAmendment:   ['Owner','General Manager','Purchasing Agent','Finance'],
   markInvoicePaid:      ['Owner','General Manager','Finance'],
+  // Where buyers send money — same Owner/GM-only rule the database enforces (is_business_admin),
+  // since a swapped account number is the classic way business payments get stolen.
+  managePaymentDetails: ['Owner','General Manager'],
   // Suppliers & pricing
   respondToPriceAgreement: ['Owner','General Manager','Purchasing Agent','Finance'],
   proposeTerms:            ['Owner','General Manager','Purchasing Agent'],
@@ -5427,7 +5437,7 @@ function navigate(page){
     }
     if(page==='messages'){ updateInstallButtonVisibility(); maybeAutoRequestNotifications(); }
     if(page==='suppliers'){ renderSupplierChips(); renderSuppliersTable(); }
-    if(page==='settings'){ renderTeamMembersList(); renderCustomRolesList(); renderBillingSettings(); renderReferralPanel(); renderNotificationSettingsPanel(); renderPushLogPanel(); renderTaxProfileSettings(); renderBirDeadlineCard(); renderApprovalThresholdSettings(); renderAuditLogContent(); renderDownstreamSalesSettingsCard(); renderSupportContactForm(); }
+    if(page==='settings'){ renderTeamMembersList(); renderCustomRolesList(); renderBillingSettings(); renderReferralPanel(); renderNotificationSettingsPanel(); renderPushLogPanel(); renderTaxProfileSettings(); renderPaymentDetailsSettings(); renderBirDeadlineCard(); renderApprovalThresholdSettings(); renderAuditLogContent(); renderDownstreamSalesSettingsCard(); renderSupportContactForm(); }
   }
   window.scrollTo(0,0);
 }
@@ -9642,6 +9652,13 @@ function refreshOrderModalIfOpen(id){
 function getBuyerNextAction(o){
   if(pendingAmendment(o)) return 'Awaiting supplier reply to your amendment';
   if(o.rma && o.rma.status==='open') return 'Awaiting supplier on your return/dispute';
+  if(o.depositRequired && o.status==='confirmed' && computeDepositPaid(o) < o.depositRequired.amount){
+    return (computeDepositPaid(o) + computeDepositPending(o) >= o.depositRequired.amount) ? 'Waiting on supplier to confirm your deposit' : 'Pay the deposit';
+  }
+  if(o.status==='invoiced' && o.invoice && o.invoice.status!=='paid'){
+    const pi = computeInvoicePayments(o);
+    if(pi.pendingAmount > 0 && pi.balance - pi.pendingAmount <= 0) return 'Waiting on supplier to confirm your payment';
+  }
   switch(o.status){
     case 'draft': return 'Send this PO';
     case 'sent': return 'Waiting on supplier to confirm';
@@ -9661,6 +9678,7 @@ function getBuyerNextAction(o){
 function getSupplierNextAction(o){
   if(pendingAmendment(o)) return "Respond to buyer's amendment request";
   if(o.rma && o.rma.status==='open') return "Resolve buyer's return/dispute";
+  if(poHasPaymentsAwaitingSupplier(o)) return "Confirm the buyer's payment";
   switch(o.status){
     case 'sent': return 'Confirm or counter this PO';
     case 'countered': return 'Waiting on buyer';
@@ -9762,6 +9780,9 @@ function renderSupplierStatusPill(o){
 function getBuyerActionColorClass(o){
   if(pendingAmendment(o)) return 'pill-lowstock';
   if(o.rma && o.rma.status==='open') return 'pill-lowstock';
+  const next = getBuyerNextAction(o);
+  if(next === 'Pay the deposit') return 'pill-lowstock';
+  if(next === 'Waiting on supplier to confirm your deposit' || next === 'Waiting on supplier to confirm your payment') return 'pill-neutral';
   switch(o.status){
     case 'draft': return 'pill-lowstock';
     case 'sent': return 'pill-neutral';
@@ -9781,6 +9802,7 @@ function getBuyerActionColorClass(o){
 function getSupplierActionColorClass(o){
   if(pendingAmendment(o)) return 'pill-lowstock';
   if(o.rma && o.rma.status==='open') return 'pill-lowstock';
+  if(poHasPaymentsAwaitingSupplier(o)) return 'pill-lowstock';
   switch(o.status){
     case 'sent': return 'pill-lowstock';
     case 'countered': return 'pill-neutral';
@@ -9950,8 +9972,8 @@ function renderTimelineStepExtra(po, h, side){
       bits.push(`<span style="color:var(--green);">✓ Matches computed total</span>`);
     }
   }
-  if(h.action.indexOf('Payment recorded') === 0 && po.invoice && po.invoice.payments && po.invoice.payments.length){
-    const withProof = [...po.invoice.payments].reverse().find(p=>p.proofUrl);
+  if(/^Payment (recorded|submitted|received)/.test(h.action) && po.invoice && po.invoice.payments && po.invoice.payments.length){
+    const withProof = [...po.invoice.payments].reverse().find(p=>isSafeProofUrl(p.proofUrl));
     if(withProof) bits.push(`<a href="${withProof.proofUrl}" download="${withProof.proofName}" onclick="event.stopPropagation();" style="display:inline-block;margin-top:4px;padding:5px 10px;background:var(--green-soft);color:var(--green-hover);border-radius:7px;font-weight:700;text-decoration:none;font-size:15px;">📎 Download proof of payment</a>`);
   }
   if(h.action.indexOf('Delivery confirmed') === 0 && po.deliveryConfirmation && po.deliveryConfirmation.proofUrl){
@@ -10424,10 +10446,8 @@ async function submitRmaCreditNote(id){
   po.rma.creditNote = {number: cnNumber, amount, issuedAt: APP_TODAY};
   if(po.invoice){
     if(!po.invoice.payments) po.invoice.payments = [];
-    po.invoice.payments.push({method:'credit_note', amount, reference:'CN-'+String(cnNumber).padStart(6,'0'), checkDate:null, date:APP_TODAY});
-    const after = computeInvoicePayments(po);
-    if(after.balance <= 0 && !after.hasPendingCheck){ po.invoice.status = 'paid'; po.status = 'paid'; }
-    else po.invoice.status = 'partially_paid';
+    po.invoice.payments.push({id:newRecordId(), method:'credit_note', amount, reference:'CN-'+String(cnNumber).padStart(6,'0'), checkDate:null, date:APP_TODAY, confirmStatus:'confirmed', confirmedAt:APP_TODAY, submittedBy:'supplier'});
+    settleInvoiceStatus(po);
   }
   poLogHistory(po, 'supplier', 'Issued Credit Note CN-'+String(cnNumber).padStart(6,'0')+' for '+fmtPHP(amount));
   const formEl_rmaResolve = document.getElementById('rmaResolveForm_'+id); if(formEl_rmaResolve) formEl_rmaResolve.innerHTML = '';
@@ -10533,7 +10553,10 @@ function renderBuyerPoDetail(o){
   } else if((o.status==='shipped' || o.status==='in_customs') && !o.deliveryConfirmation){
     actionsHtml = `<button class="btn btn-primary" onclick="event.stopPropagation(); openDeliveryConfirm('${o.id}')">Confirm Delivery →</button>`;
   } else if(o.status==='invoiced' && o.invoice && o.invoice.status!=='paid'){
-    actionsHtml = `<button class="btn btn-primary" onclick="event.stopPropagation(); openMarkPaidForm('${o.id}')">Mark Invoice as Paid →</button><div id="markPaidForm_${o.id}"></div>`;
+    const rejected = (o.invoice.payments||[]).some(p => p.confirmStatus==='rejected' || (p.method==='check' && p.checkStatus==='bounced'));
+    actionsHtml = `<button class="btn btn-primary" onclick="event.stopPropagation(); openMarkPaidForm('${o.id}')">Pay Invoice →</button><div id="markPaidForm_${o.id}" style="width:100%;">${rejected ? renderPaymentPanel(o.id) : ''}</div>`;
+  } else if(o.invoice){
+    actionsHtml = `<button class="btn btn-outline" onclick="event.stopPropagation(); openMarkPaidForm('${o.id}')">💳 Payments</button><div id="markPaidForm_${o.id}" style="width:100%;"></div>`;
   }
   const pendingAmend = pendingAmendment(o);
   const amendBtn = (!pendingAmend && AMENDABLE_STATUSES.includes(o.status)) ? `<button class="btn btn-outline" style="color:var(--danger);border-color:var(--danger);" onclick="event.stopPropagation(); openAmendForm('${o.id}')">Request Amendment</button>` : '';
@@ -10546,6 +10569,7 @@ function renderBuyerPoDetail(o){
     ${renderUndoBanner(o, 'buyer')}
     ${renderRmaBanner(o)}
     ${renderSupplierPodBanner(o)}
+    ${renderDepositSection(o, 'buyer')}
     <div id="deliveryConfirmForm_${o.id}"></div>
     <div class="expand-actions" style="margin-top:16px;">${actionsHtml}</div>
     <div class="expand-actions" style="margin-top:12px;">
@@ -10578,7 +10602,6 @@ function renderPoSecondaryDetails(o, side){
     ${renderPoUtilityBar(o, side)}
     ${renderLandedCostSection(o, side)}
     ${renderBackorderBanner(o)}
-    ${renderDepositSection(o, side)}
     ${renderInternalCoordinationPanel(o, side)}
     ${side==='buyer' ? renderRelationshipNotes(o.supplierId, o.supplierName) : renderRelationshipNotes(o.buyerId, o.buyerName)}
   `;
@@ -11545,7 +11568,7 @@ function openSupplierDeliveryConfirm(id){
     ${showCodSection ? `<div style="padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;">
       <div style="font-size:14px;font-weight:700;margin-bottom:6px;">Collected cash or payment at the door? (optional — leave blank if not COD)</div>
       <select id="supplierDcCodMethod_${id}" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:var(--font-b);font-size:14.5px;margin-right:6px;">
-        <option value="cash">Cash</option><option value="gcash">GCash</option><option value="maya">Maya</option>
+        ${paymentMethodOptionsHtml('cash')}
       </select>
       <input type="number" id="supplierDcCodAmount_${id}" placeholder="Amount collected" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:var(--font-b);font-size:14.5px;width:150px;">
     </div>` : ''}
@@ -11578,7 +11601,9 @@ function submitSupplierDeliveryConfirm(id){
     // invoice eventually gets issued, the same way a deposit is, so it's never double-counted.
     let codMsg = '';
     if(codAmount > 0){
-      po.codPayment = {method: codMethod, amount: codAmount, date: APP_TODAY};
+      po.codPayment = codMethod==='check'
+        ? {id:newRecordId(), method: codMethod, amount: codAmount, date: APP_TODAY, confirmStatus:'pending', checkStatus:'pending', submittedBy:'supplier'}
+        : {id:newRecordId(), method: codMethod, amount: codAmount, date: APP_TODAY, confirmStatus:'confirmed', confirmedAt: APP_TODAY, submittedBy:'supplier'};
       codMsg = ' — '+fmtPHP(codAmount)+' collected via '+(PAYMENT_METHOD_LABELS[codMethod]||codMethod);
     }
     // Same bilateral-truth update the buyer's own confirmation triggers — the goods really did
@@ -11600,209 +11625,267 @@ function submitSupplierDeliveryConfirm(id){
 }
 const PAYMENT_PROOF_REQUIRED_THRESHOLD = 20000; // Section 5 #12 — configurable peso threshold
 // ---- Payments ----
-// Real reconciliation runs on the method + reference number, not the photo alone — a screenshot
-// shows a payment happened, but the GCash/bank reference (or check number) is what actually gets
-// matched against a statement later. Partial payments and post-dated checks are both first-class
-// here: balance is computed from every payment on file, not a single unpaid/paid flag. An
-// uncleared or bounced check doesn't count toward the balance until it actually clears — same as
-// it wouldn't in a real ledger.
-const PAYMENT_METHOD_LABELS = {gcash:'GCash', maya:'Maya', bank_transfer:'Bank Transfer', check:'Check', cash:'Cash', credit_note:'Credit Note'};
+// Nifti never touches money. A buyer pays the supplier directly — GCash, Maya, bank transfer, etc.,
+// into the accounts the supplier listed under Settings → "How buyers pay you" — then records it
+// here with the reference number (plus a screenshot above the proof threshold).
+// A buyer-recorded payment is only a CLAIM: it stays 'pending' and does not reduce the balance
+// until the supplier checks their own GCash/bank app and taps "Received". Screenshots are easy to
+// fake; the supplier's own account is the real proof. The same rule is enforced server-side (the
+// guard_po_payments trigger on purchase_orders): a write from the buyer's side can never mark a
+// payment confirmed, alter a confirmed one, or flip the order to paid — so editing this file in
+// devtools doesn't get around it.
+// A payment the SUPPLIER records (cash on pickup, a transfer they already see) counts right away —
+// the receiving side is the one vouching for it. Checks still need an explicit clear/bounce step.
+// Reconciliation still runs on method + reference number: that's what gets matched against the
+// supplier's own e-wallet or bank statement.
+const PAYMENT_METHOD_LABELS = {gcash:'GCash', maya:'Maya', bank_transfer:'Bank Transfer', bank_deposit:'Bank Deposit', grabpay:'GrabPay', shopeepay:'ShopeePay', remittance:'Remittance', check:'Check', cash:'Cash', credit_note:'Credit Note'};
+// What a person can pick when recording a payment — credit_note is only ever system-generated.
+const PAYMENT_METHOD_CHOICES = [
+  ['gcash','GCash'], ['maya','Maya'], ['bank_transfer','Bank Transfer (InstaPay / PESONet / online banking)'],
+  ['bank_deposit','Bank Deposit (over the counter)'], ['grabpay','GrabPay'], ['shopeepay','ShopeePay'],
+  ['remittance','Remittance center (Palawan, Cebuana, M Lhuillier…)'], ['check','Check'], ['cash','Cash'],
+];
+const PAYMENT_REF_LABELS = {gcash:'GCash reference number', maya:'Maya reference number', bank_transfer:'Transfer reference number', bank_deposit:'Deposit slip / transaction number', grabpay:'GrabPay reference number', shopeepay:'ShopeePay reference number', remittance:'Control / tracking number', check:'Check number', cash:'Reference / note (optional)'};
+function paymentMethodOptionsHtml(selected){
+  return PAYMENT_METHOD_CHOICES.map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('');
+}
+// Text typed by the OTHER business (account names, reference numbers, rejection reasons) ends up
+// on this screen — escape it instead of trusting it as HTML.
+function escapeHtml(s){
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+// For free text that goes into order history (rendered as HTML on both sides' screens).
+function stripMarkup(s){ return String(s == null ? '' : s).replace(/[<>"'`]/g, '').trim(); }
+function isSafeImageDataUrl(u){ return typeof u==='string' && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(u); }
+function isSafeProofUrl(u){ return typeof u==='string' && /^data:(image\/(png|jpeg|webp|gif)|application\/pdf);base64,[A-Za-z0-9+/=]+$/.test(u); }
+// Counts toward the balance only once the receiving side has confirmed it (entries from before
+// this confirmation step existed carry no confirmStatus and were already final), and a check
+// only once it has actually cleared.
+function paymentIsCounted(p){
+  if((p.confirmStatus || 'confirmed') !== 'confirmed') return false;
+  if(p.method==='check' && p.checkStatus!=='cleared') return false;
+  return true;
+}
+// Waiting on the supplier: a buyer's submission they haven't confirmed yet, or a check that
+// hasn't cleared or bounced.
+function paymentNeedsSupplierAction(p){
+  if(p.confirmStatus==='rejected') return false;
+  return p.confirmStatus==='pending' || (p.method==='check' && p.checkStatus==='pending');
+}
 function computeInvoicePayments(po){
   const payments = (po.invoice && po.invoice.payments) || [];
-  const totalPaid = payments.reduce((sum, p) => (p.method==='check' && p.checkStatus!=='cleared') ? sum : sum + p.amount, 0);
+  const totalPaid = payments.reduce((sum, p) => paymentIsCounted(p) ? sum + Number(p.amount||0) : sum, 0);
   const total = poTotal(po);
   const balance = roundPeso(total - totalPaid);
-  const hasPendingCheck = payments.some(p => p.method==='check' && p.checkStatus==='pending');
-  return {payments, totalPaid, balance, total, hasPendingCheck};
+  const awaiting = payments.filter(paymentNeedsSupplierAction);
+  const pendingAmount = roundPeso(awaiting.reduce((s,p)=>s+Number(p.amount||0), 0));
+  const hasPendingCheck = awaiting.some(p => p.method==='check');
+  return {payments, totalPaid, balance, total, hasPendingCheck, pendingAmount, awaitingCount: awaiting.length};
+}
+function poHasPaymentsAwaitingSupplier(po){
+  return ((po.invoice && po.invoice.payments) || []).some(paymentNeedsSupplierAction)
+      || (po.depositPayments || []).some(paymentNeedsSupplierAction);
+}
+// Date of the most recent payment that actually counts — what the payment-speed metrics measure.
+function lastCountedPaymentDate(po){
+  const counted = ((po.invoice && po.invoice.payments) || []).filter(paymentIsCounted);
+  return counted.length ? (counted[counted.length-1].confirmedAt || counted[counted.length-1].date) : null;
+}
+// Which side of this order the person looking at it is on. A real account is fixed to its own
+// business; demo mode follows the Viewing-as toggle.
+function viewerSideForPo(po){
+  if(myBusiness) return myBusiness.id === po.supplierId ? 'supplier' : 'buyer';
+  return currentAppRole === 'supplier' ? 'supplier' : 'buyer';
+}
+// Payment ids end up inside onclick="" attributes on the counterparty's screen, so only a plain
+// id is used as-is; anything else (including legacy entries with no id) is addressed by position.
+function paymentKey(p, i){ return (typeof p.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(p.id)) ? p.id : '#'+i; }
+function paymentListFor(po, kind){
+  if(kind === 'deposit'){ if(!po.depositPayments) po.depositPayments = []; return po.depositPayments; }
+  if(!po.invoice) return [];
+  if(!po.invoice.payments) po.invoice.payments = [];
+  return po.invoice.payments;
+}
+function findPayment(po, kind, key){
+  const list = paymentListFor(po, kind);
+  if(String(key).startsWith('#')) return list[Number(String(key).slice(1))] || null;
+  return list.find(p => p.id === key) || null;
+}
+// A deposit payment is copied into the invoice when it's issued (see issueInvoice) — keep the
+// two copies' confirmation status in step, whichever one the supplier acted on.
+function mirrorPaymentStatus(po, kind, p){
+  if(!p.id) return;
+  const other = (kind === 'deposit' ? ((po.invoice && po.invoice.payments) || []) : (po.depositPayments || [])).find(x => x.id === p.id);
+  if(!other) return;
+  ['confirmStatus','confirmedAt','rejectReason','rejectedAt','checkStatus'].forEach(k => { if(p[k] !== undefined) other[k] = p[k]; });
+}
+function paymentSummaryText(p){
+  return `${PAYMENT_METHOD_LABELS[p.method]||stripMarkup(p.method)} ${fmtPHP(p.amount)}${p.reference ? ' (ref '+stripMarkup(p.reference)+')' : ''}`;
+}
+// Recomputes invoice/order paid status from what's actually confirmed. Only ever runs from the
+// supplier's side (confirm/reject/record) — guard_po_payments keeps a buyer's write from moving
+// an order to paid regardless.
+function settleInvoiceStatus(po){
+  if(!po.invoice) return;
+  const after = computeInvoicePayments(po);
+  if(after.balance <= 0 && !after.hasPendingCheck){
+    if(po.invoice.status !== 'paid'){
+      po.invoice.status = 'paid';
+      po.invoice.paidOn = APP_TODAY;
+      po.invoice.wasOnTime = APP_TODAY <= po.invoice.dueDate;
+    }
+    po.status = 'paid';
+  } else {
+    po.invoice.status = after.totalPaid > 0 ? 'partially_paid' : 'unpaid';
+    if(po.status === 'paid') po.status = 'invoiced';
+  }
 }
 function openMarkPaidForm(id){
   const el = document.getElementById('markPaidForm_'+id);
+  if(!el) return;
   if(el.innerHTML.trim() !== ''){ el.innerHTML = ''; return; }
   el.innerHTML = renderPaymentPanel(id);
 }
-function renderPaymentPanel(id){
-  const po = getPO(id);
-  const {payments, totalPaid, balance, total} = computeInvoicePayments(po);
-  const historyHtml = payments.length ? `<div style="margin-bottom:14px;">
-    <div style="font-size:15px;font-weight:700;color:var(--ink);margin-bottom:6px;">Payments recorded so far</div>
-    ${payments.map((p,i) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:15px;flex-wrap:wrap;">
-      <div>${PAYMENT_METHOD_LABELS[p.method]} · ${fmtPHP(p.amount)}${p.reference ? ' · Ref '+p.reference : ''}${p.date ? ' · '+p.date : ''}
-        ${p.method==='check' ? `<span style="font-weight:700;color:${p.checkStatus==='cleared'?'var(--green)':p.checkStatus==='bounced'?'var(--danger)':'var(--lowstock-fill)'};"> — Check ${p.checkStatus==='cleared'?'cleared':p.checkStatus==='bounced'?'BOUNCED':'pending clearance'}${p.checkDate ? ' (dated '+p.checkDate+')' : ''}</span>` : ''}
+function afterPaymentChange(po){
+  const wrap = document.getElementById('markPaidForm_'+po.id);
+  if(wrap && wrap.innerHTML.trim() !== '') wrap.innerHTML = renderPaymentPanel(po.id);
+  renderOrdersTable();
+  renderSupplierOrdersTable();
+  refreshOrderModalIfOpen(po.id);
+  scheduleNiftiSave();
+}
+function renderPaymentStatusTag(p){
+  if(p.confirmStatus==='rejected' || (p.method==='check' && p.checkStatus==='bounced')){
+    return `<span style="font-weight:700;color:var(--danger);">✕ ${p.method==='check' ? 'Check bounced' : 'Supplier says not received'}${p.rejectReason ? ' — "'+escapeHtml(p.rejectReason)+'"' : ''}</span>`;
+  }
+  if(paymentNeedsSupplierAction(p)){
+    return `<span style="font-weight:700;color:var(--lowstock);">⏳ ${p.method==='check' ? 'Check waiting to clear' : 'Waiting for supplier to confirm'}</span>`;
+  }
+  return `<span style="font-weight:700;color:var(--green);">✓ ${p.method==='check' ? 'Check cleared' : 'Confirmed received'}</span>`;
+}
+function renderPaymentRow(po, kind, p, i, side){
+  const key = paymentKey(p, i);
+  const domKey = key.replace('#','i');
+  const proof = isSafeProofUrl(p.proofUrl) ? ` · <a href="${p.proofUrl}" download="${escapeHtml(p.proofName||'proof-of-payment')}" onclick="event.stopPropagation();" style="font-weight:700;color:var(--green-hover);">📎 Proof</a>` : '';
+  let actions = '';
+  if(side==='supplier' && paymentNeedsSupplierAction(p)){
+    const yes = p.method==='check' ? 'Check cleared ✓' : 'Received in my account ✓';
+    const no = p.method==='check' ? 'Check bounced' : 'Not received';
+    actions = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+        <button class="btn btn-primary" style="padding:6px 12px;font-size:14px;" onclick="event.stopPropagation(); confirmPaymentReceived('${po.id}','${kind}','${key}')">${yes}</button>
+        <button class="btn btn-outline" style="padding:6px 12px;font-size:14px;color:var(--danger);border-color:var(--danger);" onclick="event.stopPropagation(); openRejectPaymentForm('${po.id}','${kind}','${key}')">${no}</button>
       </div>
-      ${(p.method==='check' && p.checkStatus==='pending') ? `<div style="display:flex;gap:6px;flex-shrink:0;"><button class="btn btn-outline" style="padding:5px 10px;font-size:13.5px;" onclick="event.stopPropagation(); markCheckCleared('${id}', ${i})">Mark cleared</button><button class="btn btn-outline" style="padding:5px 10px;font-size:13.5px;color:var(--danger);border-color:var(--danger);" onclick="event.stopPropagation(); markCheckBounced('${id}', ${i})">Mark bounced</button></div>` : ''}
-    </div>`).join('')}
-  </div>` : '';
-  const required = balance > PAYMENT_PROOF_REQUIRED_THRESHOLD;
-  return `<div class="spine-inline-action" style="margin-top:8px;">
-    <button class="btn btn-outline" style="margin-bottom:10px;" onclick="event.stopPropagation(); openPayNowPanel('${id}')">💳 Show Payment QR Codes</button>
-    <div id="payNowPanel_${id}"></div>
-    ${(myBusiness && myBusiness.id === po.buyerId) ? `<div style="margin-bottom:14px;padding:12px;border:1.5px solid var(--green);border-radius:10px;">
-      <div style="font-weight:700;margin-bottom:6px;">Pay with GCash or Maya — real payment (sandbox/test mode)</div>
-      <div style="font-size:14px;color:var(--ink);opacity:.8;margin-bottom:8px;">Opens an actual PayMongo checkout. The invoice only marks itself paid once PayMongo confirms the payment went through — not on your say-so.</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn btn-primary" onclick="event.stopPropagation(); startGcashPayment('${id}', event.target)">Pay ${fmtPHP(balance)} with GCash →</button>
-        <button class="btn btn-primary" onclick="event.stopPropagation(); startMayaPayment('${id}', event.target)">Pay ${fmtPHP(balance)} with Maya →</button>
-      </div>
-      <div id="gcashPayError_${id}" style="font-size:14px;color:var(--danger);font-weight:600;margin-top:6px;"></div>
-      <div id="mayaPayError_${id}" style="font-size:14px;color:var(--danger);font-weight:600;margin-top:6px;"></div>
-    </div>` : ''}
-    ${historyHtml}
-    <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:10px;">Balance due: ${fmtPHP(balance)}${totalPaid>0 ? ` (of ${fmtPHP(total)})` : ''}</div>
-    <div class="row-2">
-      <div class="field"><label>Payment method</label>
-        <select id="payMethod_${id}" onchange="togglePaymentFields('${id}')">
-          <option value="gcash">GCash</option>
-          <option value="maya">Maya</option>
-          <option value="bank_transfer">Bank Transfer</option>
-          <option value="check">Check</option>
-          <option value="cash">Cash</option>
-        </select>
-      </div>
-      <div class="field"><label>Amount received</label><input type="number" id="payAmount_${id}" value="${balance}" min="0" step="0.01"></div>
-    </div>
-    <div class="row-2">
-      <div class="field" id="payRefWrap_${id}"><label id="payRefLabel_${id}">GCash reference number</label><input type="text" id="payRef_${id}"></div>
-      <div class="field hidden" id="payCheckDateWrap_${id}"><label>Check date</label><input type="date" id="payCheckDate_${id}"></div>
-    </div>
-    <div style="font-size:15px;color:${required ? 'var(--danger)' : 'var(--ink)'};font-weight:${required?700:400};margin-bottom:8px;">${required
-      ? `Over ${fmtPHP(PAYMENT_PROOF_REQUIRED_THRESHOLD)} — proof of payment is required.`
-      : 'Proof of payment (optional).'}</div>
-    <input type="file" id="paidProof_${id}" accept="image/*" style="margin-bottom:10px;">
-    <button class="btn btn-primary" onclick="event.stopPropagation(); submitRecordPayment('${id}')">Record payment →</button>
+      <div id="rejectPayForm_${po.id}_${kind}_${domKey}"></div>`;
+  } else if(side==='buyer' && p.confirmStatus==='pending'){
+    actions = `<div style="margin-top:4px;"><span class="row-action" style="font-size:13.5px;" onclick="event.stopPropagation(); withdrawPayment('${po.id}','${kind}','${key}')">Withdraw — I entered this wrong</span></div>`;
+  }
+  return `<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:15px;">
+    <div>${PAYMENT_METHOD_LABELS[p.method]||escapeHtml(p.method)} · ${fmtPHP(p.amount)}${p.reference ? ' · Ref '+escapeHtml(p.reference) : ''}${p.date ? ' · '+escapeHtml(p.date) : ''}${p.checkDate ? ' · check dated '+escapeHtml(p.checkDate) : ''}${proof}</div>
+    <div style="font-size:14px;margin-top:2px;">${renderPaymentStatusTag(p)}</div>
+    ${actions}
   </div>`;
 }
-// Lands a buyer back from a PayMongo checkout redirect somewhere that actually tells them
-// something, instead of the hash silently doing nothing (confirmed via a earlier grep: nothing in
-// this file ever read #payment-result before now). create-gcash-payment/create-maya-payment both
-// set their PayMongo redirect/return_url to `${paymentReturnBase()}#payment-result?po=<id>&status=<...>`.
-// Deliberately does NOT claim the payment is confirmed paid here — completing the GCash/Maya
-// approval step only means PayMongo is now processing it; the webhook (paymongo-webhook, verified
-// against PayMongo's own signature) is the only thing that actually marks the invoice paid, and
-// the realtime subscription already running (subscribeToPurchaseOrders) will reflect that the
-// moment it lands, without needing this handler to poll for it.
-function handlePaymentResultHash(){
-  const hash = location.hash;
-  if(!hash.startsWith('#payment-result')) return;
-  const queryStart = hash.indexOf('?');
-  const params = new URLSearchParams(queryStart > -1 ? hash.slice(queryStart+1) : '');
-  const poId = params.get('po');
-  const status = params.get('status');
-  // Strip the hash right away so a later reload or back-navigation on this same tab doesn't
-  // re-show this toast for a page that isn't actually returning from checkout anymore.
-  history.replaceState(null, '', location.pathname + location.search);
-  navigate('orders');
-  if(status === 'failed'){
-    showToast("Payment wasn't completed — you can try again from this order's Payments tab.", 'error');
-  } else {
-    showToast("Payment submitted — this order will update automatically once PayMongo confirms it.", 'success');
-  }
-  const po = poId ? getPO(poId) : null;
-  if(po) openOrderDetailModal(po.id, false); // whoever completes a checkout here is definitionally the buyer (create-gcash-payment/create-maya-payment both reject anyone else)
-}
-async function startGcashPayment(id, btn){
-  // Every other real-money action in this app (submitRecordPayment, submitRmaCreditNote, the COD
-  // and past-due mark-paid paths) requires markInvoicePaid; kicking off a real PayMongo checkout
-  // is the same category of action and had no permission check at all, letting any team member —
-  // not just Owner/GM/Finance — trigger it from renderPaymentPanel's buyer-gated block.
-  if(!requirePermission('markInvoicePaid')) return;
-  // Guards against a double-click firing two payment intents for the same invoice before the
-  // first request even resolves -- there was nothing stopping that before.
-  if(btn){ if(btn.disabled) return; btn.disabled = true; btn.textContent = 'Starting payment…'; }
-  const errEl = document.getElementById('gcashPayError_'+id);
-  if(errEl) errEl.textContent = '';
-  const { data, error } = await sb.functions.invoke('create-gcash-payment', { body: { po_id: id, return_base: paymentReturnBase() } });
-  if(error || !data || data.error){
-    if(errEl) errEl.textContent = (data && data.error) || (error && error.message) || 'Could not start payment. Try again.';
-    if(btn){ btn.disabled = false; btn.textContent = `Pay ${fmtPHP(computeInvoicePayments(getPO(id)).balance)} with GCash →`; }
-    return;
-  }
-  window.location.href = data.checkout_url; // real PayMongo (test mode) GCash checkout
-}
-// Full URL of this page (minus query/hash), so PayMongo can send the buyer back to the app itself.
-// The payment functions used to build that return link from the request's Origin header alone,
-// which has no path -- on GitHub Pages (served under /SadieCutie/) every buyer landed on a 404
-// right after paying. The functions only honor this if it's the production site or localhost.
-function paymentReturnBase(){ return location.origin + location.pathname; }
-async function startMayaPayment(id, btn){
-  if(!requirePermission('markInvoicePaid')) return; // see startGcashPayment for why
-  if(btn){ if(btn.disabled) return; btn.disabled = true; btn.textContent = 'Starting payment…'; }
-  const errEl = document.getElementById('mayaPayError_'+id);
-  if(errEl) errEl.textContent = '';
-  const { data, error } = await sb.functions.invoke('create-maya-payment', { body: { po_id: id, return_base: paymentReturnBase() } });
-  if(error || !data || data.error){
-    if(errEl) errEl.textContent = (data && data.error) || (error && error.message) || 'Could not start payment. Try again.';
-    if(btn){ btn.disabled = false; btn.textContent = `Pay ${fmtPHP(computeInvoicePayments(getPO(id)).balance)} with Maya →`; }
-    return;
-  }
-  window.location.href = data.checkout_url; // real PayMongo (test mode) Maya checkout
+function renderPaymentPanel(id){
+  const po = getPO(id);
+  if(!po || !po.invoice) return '';
+  const side = viewerSideForPo(po);
+  const {payments, totalPaid, balance, total, pendingAmount} = computeInvoicePayments(po);
+  const supplierName = escapeHtml(po.supplierName);
+  const historyHtml = payments.length ? `<div style="margin-bottom:14px;">
+    <div style="font-size:15px;font-weight:700;color:var(--ink);margin-bottom:2px;">Payments on this invoice</div>
+    ${payments.map((p,i) => renderPaymentRow(po, 'invoice', p, i, side)).join('')}
+  </div>` : '';
+  const pendingLine = pendingAmount > 0
+    ? `<div style="font-size:14.5px;color:var(--ink);margin-bottom:10px;">⏳ ${fmtPHP(pendingAmount)} ${side==='buyer' ? `submitted — waiting for ${supplierName} to confirm it arrived` : 'waiting for you to confirm — check your GCash / bank app first'}.</div>`
+    : '<div style="margin-bottom:10px;"></div>';
+  const room = side==='buyer' ? Math.max(0, roundPeso(balance - pendingAmount)) : balance;
+  const payTo = side==='buyer' ? `<div style="margin-bottom:14px;">
+      <div style="font-size:15px;font-weight:700;color:var(--ink);margin-bottom:6px;">Where to send payment</div>
+      <div id="payToDetails_${id}"><div style="font-size:14.5px;opacity:.7;">Loading ${supplierName}'s payment details…</div></div>
+    </div>` : '';
+  const form = room > 0 ? `<div style="border-top:1px solid var(--border);padding-top:12px;">
+      <div style="font-size:15px;font-weight:700;color:var(--ink);margin-bottom:2px;">${side==='buyer' ? `Already paid? Tell ${supplierName}` : 'Record a payment you received'}</div>
+      <div style="font-size:14px;color:var(--ink);opacity:.75;margin-bottom:10px;">${side==='buyer'
+        ? `It shows as "waiting for confirmation" until ${supplierName} sees the money in their own account and confirms. Your balance goes down once they do.`
+        : "Payments you record here count right away, since you're the one receiving the money. A check still has to clear first."}</div>
+      <div class="row-2">
+        <div class="field"><label>Payment method</label>
+          <select id="payMethod_${id}" onchange="togglePaymentFields('${id}')">${paymentMethodOptionsHtml('gcash')}</select>
+        </div>
+        <div class="field"><label>Amount ${side==='buyer' ? 'sent' : 'received'}</label><input type="number" id="payAmount_${id}" value="${room}" min="0" step="0.01"></div>
+      </div>
+      <div class="row-2">
+        <div class="field" id="payRefWrap_${id}"><label id="payRefLabel_${id}">${PAYMENT_REF_LABELS.gcash}</label><input type="text" id="payRef_${id}" maxlength="64"></div>
+        <div class="field hidden" id="payCheckDateWrap_${id}"><label>Check date</label><input type="date" id="payCheckDate_${id}"></div>
+      </div>
+      <div style="font-size:15px;color:var(--ink);margin-bottom:8px;">${side==='buyer'
+        ? `Screenshot or photo of your receipt — required for payments over ${fmtPHP(PAYMENT_PROOF_REQUIRED_THRESHOLD)}, and it helps ${supplierName} find your payment faster.`
+        : 'Photo (optional).'}</div>
+      <input type="file" id="paidProof_${id}" accept="image/*" style="margin-bottom:10px;">
+      <button class="btn btn-primary" onclick="event.stopPropagation(); submitRecordPayment('${id}')">${side==='buyer' ? 'Send for confirmation →' : 'Record payment →'}</button>
+    </div>` : '';
+  if(side==='buyer') setTimeout(() => loadPayToDetails(po, 'payToDetails_'+id), 0);
+  return `<div class="spine-inline-action" style="margin-top:8px;">
+    ${payTo}
+    ${historyHtml}
+    <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:4px;">Balance due: ${fmtPHP(balance)}${totalPaid>0 ? ` (of ${fmtPHP(total)})` : ''}</div>
+    ${pendingLine}
+    ${form}
+  </div>`;
 }
 function togglePaymentFields(id){
   const method = document.getElementById('payMethod_'+id).value;
   const refLabel = document.getElementById('payRefLabel_'+id);
   const checkDateWrap = document.getElementById('payCheckDateWrap_'+id);
-  const refLabels = {gcash:'GCash reference number', maya:'Maya reference number', bank_transfer:'Bank transfer reference', check:'Check number', cash:'Reference / note (optional)'};
-  if(refLabel) refLabel.textContent = refLabels[method] || 'Reference';
+  if(refLabel) refLabel.textContent = PAYMENT_REF_LABELS[method] || 'Reference';
   if(checkDateWrap) checkDateWrap.classList.toggle('hidden', method !== 'check');
-}
-// Section 7 #18 — "Pay Now" with GCash/Maya/bank QR placeholder options. No real payment
-// processing or fund-custody logic — purely a UI placeholder for the intended flow; the actual
-// record of what was paid lives in submitRecordPayment below, not here.
-function openPayNowPanel(id){
-  const po = getPO(id);
-  const el = document.getElementById('payNowPanel_'+id);
-  if(!el) return;
-  if(el.innerHTML.trim() !== ''){ el.innerHTML=''; return; }
-  const {balance} = computeInvoicePayments(po);
-  el.innerHTML = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
-    ${['GCash','Maya','Bank Transfer'].map(method=>`
-      <div style="border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;width:140px;">
-        <div style="width:100px;height:100px;background:repeating-conic-gradient(#181A1E 0% 25%, #fff 0% 50%) 50% / 14px 14px;margin:0 auto 8px;border-radius:6px;"></div>
-        <div style="font-size:15px;font-weight:700;">${method}</div>
-        <div style="font-size:15px;color:var(--ink);opacity:.65;">Scan to pay ${fmtPHP(balance)}</div>
-      </div>`).join('')}
-  </div>
-  <div style="font-size:15px;line-height:1.5;color:var(--ink);opacity:.85;">QR codes shown are placeholders — this prototype doesn't process real payments.<br>Once you've paid, record it below with the reference number so it can actually be reconciled.</div>`;
 }
 function submitRecordPayment(id){
   if(!requirePermission('markInvoicePaid')) return;
   const po = getPO(id);
+  if(!po || !po.invoice) return;
+  const side = viewerSideForPo(po);
   const method = document.getElementById('payMethod_'+id).value;
   const amount = Number(document.getElementById('payAmount_'+id).value);
-  const reference = document.getElementById('payRef_'+id).value.trim();
+  const reference = stripMarkup(document.getElementById('payRef_'+id).value).slice(0, 64);
   const checkDate = method==='check' ? document.getElementById('payCheckDate_'+id).value : null;
   const fileInput = document.getElementById('paidProof_'+id);
   const file = fileInput && fileInput.files[0];
-  const {balance} = computeInvoicePayments(po);
+  const {balance, pendingAmount} = computeInvoicePayments(po);
+  const room = side==='buyer' ? roundPeso(balance - pendingAmount) : balance;
   if(!amount || amount <= 0){ markFieldInvalid('payAmount_'+id, 'Please enter a valid amount.'); return; }
-  if(amount > balance){ markFieldInvalid('payAmount_'+id, 'This is more than the remaining balance ('+fmtPHP(balance)+'). Enter the actual amount received.'); return; }
-  if(method !== 'cash' && !reference){ markFieldInvalid('payRef_'+id, 'Please enter the '+(method==='check'?'check number':'reference number')+' — that\'s what makes this reconcilable later, not just the photo.'); return; }
+  if(amount > room){
+    markFieldInvalid('payAmount_'+id, side==='buyer' && pendingAmount > 0
+      ? `That's more than what's still owed once the payment(s) already waiting for confirmation are counted (${fmtPHP(room)} left).`
+      : 'This is more than the remaining balance ('+fmtPHP(room)+'). Enter the actual amount.');
+    return;
+  }
+  if(method !== 'cash' && !reference){ markFieldInvalid('payRef_'+id, 'Please enter the '+(method==='check'?'check number':'reference number')+" — it's how the supplier finds this payment in their own account."); return; }
   if(method==='check' && !checkDate){ markFieldInvalid('payCheckDate_'+id, 'Please enter the check date.'); return; }
-  if(!file && balance > PAYMENT_PROOF_REQUIRED_THRESHOLD){
-    markFieldInvalid('paidProof_'+id, `Payments toward a balance over ${fmtPHP(PAYMENT_PROOF_REQUIRED_THRESHOLD)} require a proof-of-payment attachment.`);
+  if(file && !(file.type||'').startsWith('image/')){ markFieldInvalid('paidProof_'+id, 'Please attach an image — a screenshot or photo of the receipt.'); return; }
+  if(side==='buyer' && !file && amount > PAYMENT_PROOF_REQUIRED_THRESHOLD){
+    markFieldInvalid('paidProof_'+id, `Payments over ${fmtPHP(PAYMENT_PROOF_REQUIRED_THRESHOLD)} need a screenshot or photo of the receipt.`);
     return;
   }
   const finish = (proofUrl, proofName) => {
     snapshotPO(po);
-    po._undoLabel = 'Payment recorded.';
-    if(!po.invoice.payments) po.invoice.payments = [];
-    po.invoice.payments.push({method, amount, reference: reference || null, checkDate,
-      checkStatus: method==='check' ? 'pending' : undefined, date: APP_TODAY, proofUrl, proofName});
-    const after = computeInvoicePayments(po);
-    if(after.balance <= 0 && !after.hasPendingCheck){
-      po.invoice.status = 'paid';
-      po.invoice.paidOn = APP_TODAY;
-      po.invoice.wasOnTime = APP_TODAY <= po.invoice.dueDate;
-      po.status = 'paid';
+    po._undoLabel = side==='buyer' ? 'Payment submitted.' : 'Payment recorded.';
+    const entry = {id: newRecordId(), method, amount, reference: reference || null, checkDate, date: APP_TODAY,
+      proofUrl: isSafeProofUrl(proofUrl) ? proofUrl : null, proofName: proofName || null, submittedBy: side};
+    if(side==='supplier' && method!=='check'){ entry.confirmStatus = 'confirmed'; entry.confirmedAt = APP_TODAY; }
+    else { entry.confirmStatus = 'pending'; if(method==='check') entry.checkStatus = 'pending'; }
+    paymentListFor(po, 'invoice').push(entry);
+    if(side==='supplier') settleInvoiceStatus(po);
+    const what = paymentSummaryText(entry);
+    if(side==='buyer'){
+      poLogHistory(po, 'buyer', `Payment submitted — ${what} — waiting for ${po.supplierName} to confirm`);
+      pushNotification(`Payment submitted — ${po.poNumber}`, 'var(--green)', {type:'order', poId:po.id});
+      showToast(`Sent to ${po.supplierName} to confirm. Your balance updates once they do.`, 'success');
     } else {
-      po.invoice.status = 'partially_paid';
+      poLogHistory(po, 'supplier', `Payment received — ${what}${method==='check' ? ' — waiting to clear' : ''}`);
+      pushNotification(`Payment recorded — ${po.poNumber}`, 'var(--green)', {type:'order', poId:po.id}, 'paymentReceived', PUSH_TEMPLATES.paymentReceived({poNumber:po.poNumber, amount}));
     }
-    poLogHistory(po, 'buyer', `Payment recorded — ${PAYMENT_METHOD_LABELS[method]} ${fmtPHP(amount)}${reference?' (ref '+reference+')':''}${method==='check'?' — pending clearance':''}`);
-    pushNotification(`Payment recorded — ${po.poNumber}`, 'var(--green)', {type:'order', poId:po.id}, 'paymentReceived', PUSH_TEMPLATES.paymentReceived({poNumber:po.poNumber, amount}));
-    const wrap = document.getElementById('markPaidForm_'+id);
-    if(wrap) wrap.innerHTML = renderPaymentPanel(id);
-    renderOrdersTable();
-    if(document.getElementById('supplierOrderRows')) renderSupplierOrdersTable();
-    refreshOrderModalIfOpen(po.id);
+    afterPaymentChange(po);
   };
   if(file){
     readImageFileCompressed(file, finish);
@@ -11810,44 +11893,275 @@ function submitRecordPayment(id){
     finish(null, null);
   }
 }
-// A check isn't money in hand the moment it's handed over — it needs an explicit clearing step,
-// same as it would at a real bank. Bouncing removes it from the balance entirely and reopens
-// the invoice, rather than silently leaving it counted.
-function markCheckCleared(id, idx){
+function confirmPaymentReceived(id, kind, key){
   if(!requirePermission('markInvoicePaid')) return;
   const po = getPO(id);
-  const p = po.invoice.payments && po.invoice.payments[idx];
-  if(!p || p.method!=='check') return;
-  p.checkStatus = 'cleared';
-  const after = computeInvoicePayments(po);
-  if(after.balance <= 0 && !after.hasPendingCheck){
-    po.invoice.status = 'paid';
-    po.invoice.paidOn = APP_TODAY;
-    po.invoice.wasOnTime = APP_TODAY <= po.invoice.dueDate;
-    po.status = 'paid';
-  }
-  poLogHistory(po, 'buyer', `Check cleared — ${fmtPHP(p.amount)}${p.reference?' (check #'+p.reference+')':''}`);
-  const wrap = document.getElementById('markPaidForm_'+id);
-  if(wrap) wrap.innerHTML = renderPaymentPanel(id);
-  renderOrdersTable();
-  if(document.getElementById('supplierOrderRows')) renderSupplierOrdersTable();
-  scheduleNiftiSave();
+  if(!po) return;
+  if(viewerSideForPo(po) !== 'supplier'){ showToast('Only '+po.supplierName+' can confirm a payment arrived.', 'error'); return; }
+  const p = findPayment(po, kind, key);
+  if(!p || !paymentNeedsSupplierAction(p)) return;
+  snapshotPO(po);
+  po._undoLabel = 'Payment confirmed.';
+  p.confirmStatus = 'confirmed';
+  p.confirmedAt = APP_TODAY;
+  if(p.method==='check') p.checkStatus = 'cleared';
+  mirrorPaymentStatus(po, kind, p);
+  settleInvoiceStatus(po);
+  const label = kind==='deposit' ? 'Deposit payment confirmed' : (p.method==='check' ? 'Check cleared' : 'Payment confirmed received');
+  poLogHistory(po, 'supplier', `${label} — ${paymentSummaryText(p)}${po.status==='paid' ? ' — invoice fully paid' : ''}`);
+  pushNotification(`${label} — ${po.poNumber}`, 'var(--green)', {type:'order', poId:po.id}, 'paymentReceived', PUSH_TEMPLATES.paymentReceived({poNumber:po.poNumber, amount:p.amount}));
+  showToast(label+'.', 'success');
+  afterPaymentChange(po);
 }
-function markCheckBounced(id, idx){
+function openRejectPaymentForm(id, kind, key){
+  const domKey = String(key).replace('#','i');
+  const el = document.getElementById(`rejectPayForm_${id}_${kind}_${domKey}`);
+  if(!el) return;
+  if(el.innerHTML.trim() !== ''){ el.innerHTML = ''; return; }
+  const po = getPO(id);
+  const p = findPayment(po, kind, key);
+  if(!p) return;
+  const isCheck = p.method==='check';
+  const inputId = `rejectPayReason_${id}_${kind}_${domKey}`;
+  el.innerHTML = `<div style="margin-top:8px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
+    <label style="font-size:14px;font-weight:700;display:block;margin-bottom:4px;">${isCheck ? 'What happened with the check?' : 'What did you find in your account?'}</label>
+    <input type="text" id="${inputId}" maxlength="200" placeholder="${isCheck ? 'e.g. Returned by the bank — insufficient funds' : 'e.g. No payment with this reference in our GCash as of 3pm'}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-family:var(--font-b);font-size:15px;box-sizing:border-box;">
+    <div style="font-size:13px;color:var(--ink);opacity:.7;margin:6px 0 8px;">${escapeHtml(po.buyerName)} will see this reason. Check first: transfers between different banks can take up to a business day (PESONet), and a check can take a few days to clear.</div>
+    <button class="btn btn-outline" style="padding:6px 12px;font-size:14px;color:var(--danger);border-color:var(--danger);" onclick="event.stopPropagation(); submitRejectPayment('${id}','${kind}','${key}')">${isCheck ? 'Mark check as bounced' : 'Mark as not received'}</button>
+  </div>`;
+}
+function submitRejectPayment(id, kind, key){
   if(!requirePermission('markInvoicePaid')) return;
   const po = getPO(id);
-  const p = po.invoice.payments && po.invoice.payments[idx];
-  if(!p || p.method!=='check') return;
-  p.checkStatus = 'bounced';
-  po.invoice.status = 'partially_paid';
-  po.status = 'invoiced';
-  poLogHistory(po, 'buyer', `⚠ Check bounced — ${fmtPHP(p.amount)}${p.reference?' (check #'+p.reference+')':''}`);
-  pushNotification(`⚠ Check bounced — ${po.poNumber}`, 'var(--danger)', {type:'order', poId:po.id});
-  const wrap = document.getElementById('markPaidForm_'+id);
-  if(wrap) wrap.innerHTML = renderPaymentPanel(id);
-  renderOrdersTable();
-  if(document.getElementById('supplierOrderRows')) renderSupplierOrdersTable();
-  scheduleNiftiSave();
+  if(!po) return;
+  if(viewerSideForPo(po) !== 'supplier'){ showToast('Only '+po.supplierName+' can mark a payment as not received.', 'error'); return; }
+  const p = findPayment(po, kind, key);
+  if(!p || !paymentNeedsSupplierAction(p)) return;
+  const inputId = `rejectPayReason_${id}_${kind}_${String(key).replace('#','i')}`;
+  const reasonEl = document.getElementById(inputId);
+  const reason = stripMarkup(reasonEl ? reasonEl.value : '').slice(0, 200);
+  if(!reason){ markFieldInvalid(inputId, 'Please say what you found, so the buyer knows what to check on their end.'); return; }
+  snapshotPO(po);
+  po._undoLabel = 'Payment marked not received.';
+  p.confirmStatus = 'rejected';
+  p.rejectReason = reason;
+  p.rejectedAt = APP_TODAY;
+  if(p.method==='check') p.checkStatus = 'bounced';
+  mirrorPaymentStatus(po, kind, p);
+  settleInvoiceStatus(po);
+  const label = p.method==='check' ? 'Check bounced' : (kind==='deposit' ? 'Deposit payment not received' : 'Payment not received');
+  poLogHistory(po, 'supplier', `⚠ ${label} — ${paymentSummaryText(p)} — "${reason}"`);
+  pushNotification(`⚠ ${label} — ${po.poNumber}`, 'var(--danger)', {type:'order', poId:po.id});
+  showToast(`Marked as not received. ${po.buyerName} has been told why.`, 'success');
+  afterPaymentChange(po);
+}
+// A buyer can pull back their own submission before it's confirmed (typo in the amount or
+// reference). guard_po_payments only allows removing entries that are still pending.
+function withdrawPayment(id, kind, key){
+  if(!requirePermission('markInvoicePaid')) return;
+  const po = getPO(id);
+  if(!po || viewerSideForPo(po) !== 'buyer') return;
+  const list = paymentListFor(po, kind);
+  const p = findPayment(po, kind, key);
+  if(!p || p.confirmStatus !== 'pending') return;
+  snapshotPO(po);
+  po._undoLabel = 'Payment submission withdrawn.';
+  list.splice(list.indexOf(p), 1);
+  poLogHistory(po, 'buyer', `Withdrew ${kind==='deposit' ? 'deposit ' : ''}payment submission — ${paymentSummaryText(p)}`);
+  afterPaymentChange(po);
+}
+
+// ---- Where buyers send payment (the supplier's own accounts) ----
+// Stored on the supplier's businesses row (payment_methods). Readable by any business they're
+// connected to (existing businesses select policy); only an Owner/General Manager can change it
+// (enforced server-side too), and every change stamps payment_methods_updated_at on the server,
+// which drives the "recently changed" warning buyers see below.
+const PAYMENT_ACCOUNT_TYPES = {gcash:'GCash', maya:'Maya', grabpay:'GrabPay', shopeepay:'ShopeePay', bank:'Bank account', remittance:'Remittance pickup', check:'Checks payable to'};
+const PAYMENT_ACCOUNT_MOBILE_TYPES = ['gcash','maya','grabpay','shopeepay','remittance'];
+const PAYMENT_DETAILS_RECENT_CHANGE_DAYS = 7;
+const PAYMENT_ACCOUNTS_MAX = 12;
+let myPaymentAccounts = [];            // demo mode's own copy — a real account reads myBusiness.payment_methods
+let myPaymentAccountsUpdatedAt = null;
+function getMyPaymentAccounts(){
+  if(myBusiness) return Array.isArray(myBusiness.payment_methods) ? myBusiness.payment_methods : [];
+  return myPaymentAccounts;
+}
+const payToDetailsCache = {};
+async function fetchPayToDetails(supplierId){
+  if(!myBusiness){
+    const own = supplierId === ME_SUPPLIER;
+    return {accounts: own ? myPaymentAccounts : [], updatedAt: own ? myPaymentAccountsUpdatedAt : null};
+  }
+  const cached = payToDetailsCache[supplierId];
+  if(cached && Date.now() - cached.fetchedAt < 60000) return cached;
+  const { data, error } = await sb.from('businesses').select('payment_methods, payment_methods_updated_at').eq('id', supplierId).single();
+  if(error || !data) return null;
+  const result = {accounts: Array.isArray(data.payment_methods) ? data.payment_methods : [], updatedAt: data.payment_methods_updated_at, fetchedAt: Date.now()};
+  payToDetailsCache[supplierId] = result;
+  return result;
+}
+async function loadPayToDetails(po, elId){
+  if(!document.getElementById(elId)) return;
+  let result = null;
+  try{ result = await fetchPayToDetails(po.supplierId); }catch(e){ result = null; }
+  const el = document.getElementById(elId);
+  if(el) el.innerHTML = renderPayToDetails(po, result);
+}
+function renderPayToDetails(po, result){
+  const name = escapeHtml(po.supplierName);
+  if(!result) return `<div class="logi-note">Couldn't load ${name}'s payment details right now. Check your connection and open this again, or ask them in chat.</div>`;
+  if(!result.accounts.length) return `<div class="logi-note">${name} hasn't added payment details to Nifti yet. Ask them in chat where to send payment, and only pay an account under their registered business name or the owner's name.</div>`;
+  const changedAt = result.updatedAt ? new Date(result.updatedAt) : null;
+  const recent = changedAt && (Date.now() - changedAt.getTime()) < PAYMENT_DETAILS_RECENT_CHANGE_DAYS*86400000;
+  const warn = recent ? `<div style="background:var(--lowstock-soft);border:1.5px solid var(--lowstock-fill);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:14.5px;line-height:1.5;">
+      <strong>⚠ ${name} changed these payment details on ${changedAt.toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'})}.</strong>
+      Before sending money, call someone you already know at ${name} to confirm the new account. Changed account details are the most common way business payment scams happen.
+    </div>` : '';
+  return `${warn}<div style="display:flex;gap:10px;flex-wrap:wrap;">${result.accounts.map(a => renderPayToAccountCard(a)).join('')}</div>
+    <div style="font-size:13.5px;color:var(--ink);opacity:.7;margin-top:8px;">Nifti doesn't hold or move money. You pay ${name} directly, then send the reference number below so they can confirm it arrived.</div>`;
+}
+function renderPayToAccountCard(a, footerHtml){
+  const typeLabel = PAYMENT_ACCOUNT_TYPES[a.type] || 'Account';
+  const category = a.type==='bank' ? 'Bank account' : (a.type==='remittance' ? 'Remittance pickup' : (a.type==='check' ? 'Check' : 'E-wallet'));
+  const title = a.type==='bank' ? escapeHtml(a.bankName || 'Bank') : (a.type==='remittance' ? 'Palawan / Cebuana / M Lhuillier' : escapeHtml(typeLabel));
+  const numLabel = a.type==='bank' ? 'Account no.' : (a.type==='remittance' ? 'Mobile no.' : 'Number');
+  const num = a.accountNumber ? `<div style="font-size:15.5px;font-weight:700;letter-spacing:.02em;margin-top:2px;">${numLabel} ${escapeHtml(a.accountNumber)}
+      <span class="row-action" style="font-size:13px;margin-left:6px;" data-copy="${escapeHtml(a.accountNumber)}" onclick="event.stopPropagation(); copyPaymentNumber(this)">Copy</span></div>` : '';
+  const qr = isSafeImageDataUrl(a.qr) ? `<img src="${a.qr}" alt="${escapeHtml(typeLabel)} QR code" style="width:160px;height:160px;object-fit:contain;display:block;margin:10px auto 0;background:#fff;border-radius:8px;">` : '';
+  return `<div style="border:1px solid var(--border);border-radius:10px;padding:12px;flex:1 1 220px;max-width:340px;background:var(--surface);box-sizing:border-box;">
+    <div style="font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;opacity:.65;">${category}</div>
+    <div style="font-size:16px;font-weight:800;margin:2px 0;">${title}</div>
+    ${a.accountName ? `<div style="font-size:15px;">${a.type==='check' ? '' : (a.type==='remittance' ? 'Receiver: ' : 'Name: ')}${escapeHtml(a.accountName)}</div>` : ''}
+    ${num}
+    ${a.notes ? `<div style="font-size:13.5px;opacity:.75;margin-top:4px;">${escapeHtml(a.notes)}</div>` : ''}
+    ${qr}
+    ${footerHtml || ''}
+  </div>`;
+}
+function copyPaymentNumber(el){
+  const text = el.getAttribute('data-copy') || '';
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(() => {
+      el.textContent = 'Copied ✓';
+      setTimeout(() => { el.textContent = 'Copy'; }, 1500);
+    }, () => showToast('Copy failed — select the number and copy it manually.'));
+  } else {
+    showToast("This browser can't copy automatically — select the number and copy it manually.");
+  }
+}
+function renderPaymentDetailsSettings(){
+  const card = document.getElementById('paymentDetailsCard');
+  const el = document.getElementById('paymentDetailsContent');
+  if(!card || !el) return;
+  const isSupplier = myBusiness ? myBusiness.type === 'supplier' : currentAppRole === 'supplier';
+  card.classList.toggle('hidden', !isSupplier);
+  if(!isSupplier) return;
+  const accounts = getMyPaymentAccounts();
+  const list = accounts.length
+    ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0;">${accounts.map((a,i) => renderPayToAccountCard(a,
+        `<div style="text-align:right;margin-top:8px;"><span class="row-action" style="color:var(--danger);font-size:13.5px;" onclick="removePaymentAccount(${i})">Remove</span></div>`)).join('')}</div>`
+    : `<div class="logi-note" style="margin:12px 0;">No payment details yet, so buyers can't see where to pay you. Add at least one account.</div>`;
+  el.innerHTML = `${list}
+    ${accounts.length < PAYMENT_ACCOUNTS_MAX ? `<button class="btn btn-outline" onclick="openAddPaymentAccountForm()">+ Add a way to get paid</button>` : ''}
+    <div id="addPaymentAccountForm"></div>`;
+}
+function openAddPaymentAccountForm(){
+  const el = document.getElementById('addPaymentAccountForm');
+  if(!el) return;
+  if(el.innerHTML.trim() !== ''){ el.innerHTML = ''; return; }
+  if(!requirePermission('managePaymentDetails')) return;
+  el.innerHTML = `<div class="spine-inline-action" style="margin-top:10px;">
+    <div class="row-2">
+      <div class="field"><label>Type</label>
+        <select id="payAcctType" onchange="togglePaymentAccountFields()">${Object.entries(PAYMENT_ACCOUNT_TYPES).map(([v,l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+      </div>
+      <div class="field hidden" id="payAcctBankWrap"><label>Bank</label><input id="payAcctBank" type="text" maxlength="80" placeholder="e.g. BDO, BPI, Metrobank, UnionBank"></div>
+    </div>
+    <div class="row-2">
+      <div class="field"><label id="payAcctNameLabel">Account name</label><input id="payAcctName" type="text" maxlength="120" placeholder="Exactly as registered"></div>
+      <div class="field" id="payAcctNumberWrap"><label id="payAcctNumberLabel">GCash mobile number</label><input id="payAcctNumber" type="text" maxlength="64" inputmode="numeric" placeholder="09XX XXX XXXX"></div>
+    </div>
+    <div class="field" id="payAcctQrWrap"><label>QR code (optional, recommended)</label>
+      <input id="payAcctQr" type="file" accept="image/png,image/jpeg,image/webp">
+      <div style="font-size:13.5px;color:var(--ink);opacity:.7;margin-top:2px;">A screenshot of your GCash/Maya "Receive money" QR, or your bank's InstaPay QR. Buyers can scan it straight from their screen.</div>
+    </div>
+    <div class="field"><label>Note for buyers (optional)</label><input id="payAcctNotes" type="text" maxlength="300" placeholder="e.g. Please send the screenshot in chat after paying"></div>
+    <div style="font-size:14px;color:var(--ink);margin:4px 0 10px;">Double-check every digit, because buyers will send real money here. For ${PAYMENT_DETAILS_RECENT_CHANGE_DAYS} days after any change, buyers see a warning to confirm the new details with you.</div>
+    <button class="btn btn-primary" onclick="submitAddPaymentAccount()">Save account →</button>
+  </div>`;
+  togglePaymentAccountFields();
+}
+function togglePaymentAccountFields(){
+  const type = document.getElementById('payAcctType').value;
+  const mobile = PAYMENT_ACCOUNT_MOBILE_TYPES.includes(type);
+  document.getElementById('payAcctBankWrap').classList.toggle('hidden', type !== 'bank');
+  document.getElementById('payAcctNumberWrap').classList.toggle('hidden', type === 'check');
+  document.getElementById('payAcctQrWrap').classList.toggle('hidden', type === 'check' || type === 'remittance');
+  document.getElementById('payAcctNameLabel').textContent = type==='check' ? 'Payable to' : (type==='remittance' ? "Receiver's full name (as on their ID)" : 'Account name');
+  document.getElementById('payAcctNumberLabel').textContent = type==='bank' ? 'Account number' : (type==='remittance' ? "Receiver's mobile number" : (PAYMENT_ACCOUNT_TYPES[type]+' mobile number'));
+  document.getElementById('payAcctNumber').placeholder = mobile ? '09XX XXX XXXX' : 'Digits only';
+}
+function submitAddPaymentAccount(){
+  if(!requirePermission('managePaymentDetails')) return;
+  const type = document.getElementById('payAcctType').value;
+  if(!PAYMENT_ACCOUNT_TYPES[type]) return;
+  const accountName = stripMarkup(document.getElementById('payAcctName').value).slice(0, 120);
+  const bankName = stripMarkup(document.getElementById('payAcctBank').value).slice(0, 80);
+  const notes = stripMarkup(document.getElementById('payAcctNotes').value).slice(0, 300);
+  const qrInput = document.getElementById('payAcctQr');
+  const qrFile = (type !== 'check' && type !== 'remittance' && qrInput) ? qrInput.files[0] : null;
+  let number = document.getElementById('payAcctNumber').value.replace(/[\s-]/g, '');
+  if(!accountName){ markFieldInvalid('payAcctName', type==='check' ? 'Enter who checks should be payable to.' : 'Enter the name exactly as it appears on the account.'); return; }
+  if(type === 'bank' && !bankName){ markFieldInvalid('payAcctBank', 'Enter the bank name.'); return; }
+  if(PAYMENT_ACCOUNT_MOBILE_TYPES.includes(type)){
+    if(number.startsWith('+63')) number = '0' + number.slice(3);
+    if(!/^09\d{9}$/.test(number)){ markFieldInvalid('payAcctNumber', 'Enter an 11-digit mobile number starting with 09.'); return; }
+  } else if(type === 'bank'){
+    if(!/^\d{6,20}$/.test(number)){ markFieldInvalid('payAcctNumber', 'Enter the account number, digits only (6 to 20 digits).'); return; }
+  } else {
+    number = '';
+  }
+  if(getMyPaymentAccounts().length >= PAYMENT_ACCOUNTS_MAX){ showToast(`You can list up to ${PAYMENT_ACCOUNTS_MAX} payment accounts.`, 'error'); return; }
+  const save = qr => {
+    const account = {id: newRecordId(), type, accountName, accountNumber: number || null, bankName: type==='bank' ? bankName : null, notes: notes || null, qr: qr || null};
+    savePaymentAccounts([...getMyPaymentAccounts(), account], 'Payment account added. Buyers will see it when they pay you.');
+  };
+  if(qrFile){
+    if(!/^image\/(png|jpeg|webp)$/.test(qrFile.type)){ markFieldInvalid('payAcctQr', 'Upload a PNG, JPG or WebP image of the QR code.'); return; }
+    readImageFileCompressed(qrFile, dataUrl => {
+      if(!isSafeImageDataUrl(dataUrl) || dataUrl.length > 400000){ markFieldInvalid('payAcctQr', "That image couldn't be used. Try a tighter screenshot of just the QR code."); return; }
+      save(dataUrl);
+    }, 700, 0.9);
+  } else {
+    save(null);
+  }
+}
+async function savePaymentAccounts(accounts, successMsg){
+  if(!requirePermission('managePaymentDetails')) return false;
+  if(myBusiness){
+    const { data, error } = await sb.from('businesses').update({payment_methods: accounts}).eq('id', myBusiness.id)
+      .select('payment_methods, payment_methods_updated_at').single();
+    if(error || !data){
+      showToast("Couldn't save your payment details, so nothing was changed" + (error && error.message ? ' (' + error.message + ')' : '') + '.', 'error');
+      return false;
+    }
+    myBusiness.payment_methods = data.payment_methods;
+    myBusiness.payment_methods_updated_at = data.payment_methods_updated_at;
+  } else {
+    myPaymentAccounts = accounts;
+    myPaymentAccountsUpdatedAt = new Date().toISOString();
+    scheduleNiftiSave();
+  }
+  logAudit('manual_override', 'business', myBusiness ? myBusiness.id : 'demo', 'paymentDetails', null, accounts.length + ' account(s)');
+  renderPaymentDetailsSettings();
+  showToast(successMsg, 'success');
+  return true;
+}
+function removePaymentAccount(index){
+  const accounts = getMyPaymentAccounts().slice();
+  if(index < 0 || index >= accounts.length) return;
+  accounts.splice(index, 1);
+  savePaymentAccounts(accounts, 'Payment account removed.');
 }
 
 /* ============ CREATE PURCHASE ORDER (the PR→PO flow) ============ */
@@ -12507,42 +12821,57 @@ function submitConfirmWithDeposit(id){
   scheduleNiftiSave();
 }
 function computeDepositPaid(po){
-  return (po.depositPayments||[]).reduce((s,p)=>s+p.amount, 0);
+  return (po.depositPayments||[]).reduce((s,p) => paymentIsCounted(p) ? s + Number(p.amount||0) : s, 0);
+}
+function computeDepositPending(po){
+  return (po.depositPayments||[]).filter(paymentNeedsSupplierAction).reduce((s,p) => s + Number(p.amount||0), 0);
 }
 function renderDepositSection(po, side){
   if(!po.depositRequired) return '';
   const paid = computeDepositPaid(po);
+  const pending = computeDepositPending(po);
   const remaining = Math.max(0, po.depositRequired.amount - paid);
+  const unclaimed = Math.max(0, roundPeso(remaining - pending));
   const isSettled = remaining <= 0;
-  const payFormHtml = (!isSettled && side==='buyer') ? `
+  const rows = (po.depositPayments||[]).map((p,i) => renderPaymentRow(po, 'deposit', p, i, side)).join('');
+  const payFormHtml = (!isSettled && side==='buyer' && unclaimed > 0) ? `
     <div style="margin-top:10px;">
-      <select id="depositMethod_${po.id}" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:var(--font-b);font-size:14.5px;">
-        <option value="gcash">GCash</option><option value="maya">Maya</option><option value="bank_transfer">Bank Transfer</option><option value="cash">Cash</option>
-      </select>
-      <input type="text" id="depositRef_${po.id}" placeholder="Reference no." style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:var(--font-b);font-size:14.5px;width:140px;">
-      <button class="btn btn-primary" style="padding:7px 14px;font-size:14.5px;" onclick="submitDepositPayment('${po.id}')">Pay deposit (${fmtPHP(remaining)}) →</button>
+      <div style="font-size:14.5px;font-weight:700;margin-bottom:6px;">Where to send the deposit</div>
+      <div id="payToDetailsDep_${po.id}"><div style="font-size:14.5px;opacity:.7;">Loading…</div></div>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+      <select id="depositMethod_${po.id}" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:var(--font-b);font-size:14.5px;">${paymentMethodOptionsHtml('gcash')}</select>
+      <input type="text" id="depositRef_${po.id}" maxlength="64" placeholder="Reference no." style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:var(--font-b);font-size:14.5px;width:160px;">
+      <button class="btn btn-primary" style="padding:7px 14px;font-size:14.5px;" onclick="event.stopPropagation(); submitDepositPayment('${po.id}')">I've paid the deposit (${fmtPHP(unclaimed)}) →</button>
     </div>` : '';
+  if(payFormHtml) setTimeout(() => loadPayToDetails(po, 'payToDetailsDep_'+po.id), 0);
+  const heading = isSettled ? '✓ Deposit paid in full'
+    : (pending > 0 && unclaimed <= 0) ? (side==='buyer' ? '⏳ Deposit sent — waiting for the supplier to confirm it arrived' : '⏳ The buyer says the deposit is paid — confirm it arrived')
+    : '⏳ Deposit required before work starts';
   return `<div class="panel-card" style="margin-top:14px;background:${isSettled?'var(--green-soft)':'var(--lowstock-soft)'};border-color:${isSettled?'var(--green)':'var(--lowstock-fill)'};">
-    <div style="font-weight:800;font-size:15px;">${isSettled ? '✓ Deposit paid in full' : '⏳ Deposit required before work starts'}</div>
-    <div style="font-size:14.5px;margin-top:4px;">${fmtPHP(paid)} of ${fmtPHP(po.depositRequired.amount)} paid${!isSettled ? ' — '+fmtPHP(remaining)+' remaining' : ''}.</div>
+    <div style="font-weight:800;font-size:15px;">${heading}</div>
+    <div style="font-size:14.5px;margin-top:4px;">${fmtPHP(paid)} of ${fmtPHP(po.depositRequired.amount)} confirmed${!isSettled ? ' — '+fmtPHP(remaining)+' remaining' : ''}${pending > 0 ? ' · '+fmtPHP(pending)+' waiting for confirmation' : ''}.</div>
+    ${rows ? `<div style="margin-top:8px;">${rows}</div>` : ''}
     ${payFormHtml}
   </div>`;
 }
 function submitDepositPayment(id){
   if(!requirePermission('markInvoicePaid')) return; // same financial-action gate as submitRecordPayment/bulkMarkPaidReconcile/submitRmaCreditNote — was missing here
   const po = getPO(id);
+  if(!po || !po.depositRequired || viewerSideForPo(po) !== 'buyer') return;
   const method = document.getElementById('depositMethod_'+id).value;
-  const reference = document.getElementById('depositRef_'+id).value.trim();
-  const remaining = po.depositRequired.amount - computeDepositPaid(po);
+  const reference = stripMarkup(document.getElementById('depositRef_'+id).value).slice(0, 64);
+  if(method !== 'cash' && !reference){ markFieldInvalid('depositRef_'+id, "Please enter the reference number — it's how the supplier finds your payment in their account."); return; }
+  const amount = roundPeso(po.depositRequired.amount - computeDepositPaid(po) - computeDepositPending(po));
+  if(amount <= 0) return;
   snapshotPO(po);
-  po._undoLabel = 'Deposit payment recorded.';
-  po.depositPayments.push({method, amount: remaining, reference: reference||'—', date: APP_TODAY});
-  poLogHistory(po, 'buyer', 'Paid deposit — '+fmtPHP(remaining)+' via '+(PAYMENT_METHOD_LABELS[method]||method));
-  if(document.getElementById('orderRows')) renderOrdersTable();
-  renderSupplierOrdersTable();
-  refreshOrderModalIfOpen(po.id);
-  showToast('Deposit paid — the supplier can now start on this order.', 'success');
-  scheduleNiftiSave();
+  po._undoLabel = 'Deposit payment submitted.';
+  const entry = {id: newRecordId(), method, amount, reference: reference || null, date: APP_TODAY, confirmStatus: 'pending', submittedBy: 'buyer'};
+  if(method === 'check') entry.checkStatus = 'pending';
+  paymentListFor(po, 'deposit').push(entry);
+  poLogHistory(po, 'buyer', 'Deposit payment submitted — '+paymentSummaryText(entry)+' — waiting for '+po.supplierName+' to confirm');
+  afterPaymentChange(po);
+  showToast(`Deposit sent for confirmation. ${po.supplierName} can start once they confirm it arrived.`, 'success');
 }
 function openCounterForm(id){
   const el = document.getElementById('counterForm_'+id);
@@ -12585,7 +12914,9 @@ function submitCounter(id){
 function markSupplierPreparing(id){
   const po = getPO(id);
   if(po.depositRequired && computeDepositPaid(po) < po.depositRequired.amount){
-    showToast(`Waiting on the ${fmtPHP(po.depositRequired.amount - computeDepositPaid(po))} deposit before you can start.`);
+    showToast(computeDepositPending(po) > 0
+      ? 'The buyer says they paid the deposit. Confirm it arrived in your account first (Deposit section on this order).'
+      : `Waiting on the ${fmtPHP(po.depositRequired.amount - computeDepositPaid(po))} deposit before you can start.`);
     return;
   }
   snapshotPO(po);
@@ -12909,17 +13240,16 @@ function issueInvoice(id){
   // payment records, not charged again.
   const carryOverPayments = [];
   if(po.depositPayments && po.depositPayments.length){
-    carryOverPayments.push(...po.depositPayments.map(p=>({method:p.method, amount:p.amount, reference:p.reference, checkDate:null, date:p.date, proofUrl:null, proofName:null})));
+    carryOverPayments.push(...po.depositPayments.filter(p => p.confirmStatus!=='rejected').map(p=>({...p, id: p.id || newRecordId(), checkDate: p.checkDate || null, proofUrl:null, proofName:null})));
   }
   if(po.codPayment){
-    carryOverPayments.push({method:po.codPayment.method, amount:po.codPayment.amount, reference:'Collected at delivery', checkDate:null, date:po.codPayment.date, proofUrl:null, proofName:null});
+    carryOverPayments.push({...po.codPayment, id: po.codPayment.id || newRecordId(), reference:'Collected at delivery', checkDate:null, proofUrl:null, proofName:null});
   }
   if(carryOverPayments.length){
     po.invoice.payments = carryOverPayments;
-    const afterCarryOver = computeInvoicePayments(po);
-    po.invoice.status = afterCarryOver.balance <= 0 ? 'paid' : 'partially_paid';
   }
   po.status = 'invoiced';
+  if(carryOverPayments.length) settleInvoiceStatus(po);
   poLogHistory(po, 'supplier', 'Invoice issued: '+po.invoice.number+(carryOverPayments.length?' — '+carryOverPayments.length+' prior payment(s) carried over':''));
   renderSupplierOrdersTable();
   if(document.getElementById('orderRows')) renderOrdersTable();
@@ -13421,7 +13751,9 @@ function renderSupplierPoDetail(o){
     ${o.riskNote ? `<div class="logi-note" style="color:var(--danger);">⏱ ${o.riskNote}</div>` : ''}
     ${renderUndoBanner(o, 'supplier')}
     ${renderRmaBanner(o)}
+    ${renderDepositSection(o, 'supplier')}
     <div class="expand-actions" style="margin-top:16px;">${actionsHtml}</div>
+    ${renderSupplierPaymentsBlock(o)}
     <div class="expand-actions" style="margin-top:12px;">
       <button class="btn btn-outline" onclick="event.stopPropagation(); openInlineMessage('${o.buyerId}','${o.id}')">💬 Message ${o.buyerName}</button>
     </div>
@@ -13431,6 +13763,19 @@ function renderSupplierPoDetail(o){
     <div id="inlineMsg_${o.id}"></div>
     ${amendHtml}${rmaResolveHtml}
     ${renderPoSecondaryDetails(o, 'supplier')}`;
+}
+// Payments on an issued invoice, from the receiving side. Opens by itself whenever a buyer's
+// payment is waiting to be confirmed, since that's the supplier's next action on this order.
+function renderSupplierPaymentsBlock(o){
+  if(!o.invoice) return '';
+  const {awaitingCount} = computeInvoicePayments(o);
+  const header = awaitingCount
+    ? `<div style="font-weight:800;font-size:15px;color:var(--lowstock);margin-bottom:4px;">● ${o.buyerName} says they paid — check your account, then confirm below</div>`
+    : '';
+  return `<div style="margin-top:12px;">${header}
+    <button class="btn btn-outline" onclick="event.stopPropagation(); openMarkPaidForm('${o.id}')">💳 Payments${awaitingCount ? ' ('+awaitingCount+' to confirm)' : ''}</button>
+    <div id="markPaidForm_${o.id}">${awaitingCount ? renderPaymentPanel(o.id) : ''}</div>
+  </div>`;
 }
 function renderSupplierOrdersTable(){
   if(!document.getElementById('supplierOrderRows')) return; // see note on renderSupplierFulfillmentDashboard above
@@ -15115,8 +15460,8 @@ function syncAnalyticsMetricsWithRealData(){
   const shippedOrLater = supplierActive.filter(o=>['shipped','in_customs','delivered','partially_delivered','invoiced','paid'].includes(o.status));
   const s8 = ALL_SUPPLIER_METRICS.find(m=>m.id==='defectrate');
   if(s8){ const disputed = shippedOrLater.filter(o=>o.rma).length; s8.v = shippedOrLater.length ? ((disputed/shippedOrLater.length)*100).toFixed(1)+'%' : '—'; s8.d = disputed+' of '+shippedOrLater.length+' shipped orders'; s8.dir='neutral'; }
-  const paidWithDueDate = supplierActive.filter(o=>o.invoice && o.invoice.dueDate && o.invoice.payments && o.invoice.payments.length);
-  const delays = paidWithDueDate.map(o=>daysBetween(o.invoice.dueDate, o.invoice.payments[o.invoice.payments.length-1].date));
+  const paidWithDueDate = supplierActive.filter(o=>o.invoice && o.invoice.dueDate && lastCountedPaymentDate(o));
+  const delays = paidWithDueDate.map(o=>daysBetween(o.invoice.dueDate, lastCountedPaymentDate(o)));
   const s9 = ALL_SUPPLIER_METRICS.find(m=>m.id==='paymentdelay');
   if(s9){ const avg = delays.length ? delays.reduce((s,d)=>s+d,0)/delays.length : null; s9.v = avg!==null ? (avg>=0?'+':'')+avg.toFixed(1)+' days' : '—'; s9.d = avg!==null ? (avg>0?'past due date, on average':'on or before due date, on average') : 'No paid invoices with a due date yet'; s9.dir='neutral'; }
 }
@@ -15977,10 +16322,10 @@ function computeDaysInventoryOutstanding(){
 function computeAverageCollectionDays(role){
   // role='supplier': how long buyers take to pay them. role='buyer': how long they take to pay suppliers.
   const orders = (role==='supplier' ? getSupplierPOs() : getBuyerPOs())
-    .filter(o => o.invoice && o.invoice.payments && o.invoice.payments.length && o.createdDate);
+    .filter(o => o.invoice && lastCountedPaymentDate(o) && o.createdDate);
   if(!orders.length) return null;
   const days = orders.map(o => {
-    const lastPayDate = o.invoice.payments[o.invoice.payments.length-1].date;
+    const lastPayDate = lastCountedPaymentDate(o);
     return daysBetween(o.createdDate, lastPayDate);
   }).filter(d => d>=0);
   if(!days.length) return null;
@@ -15999,8 +16344,8 @@ function findSlowestInventoryItems(limit){
 }
 function findSlowestPayingBuyers(limit){
   const byBuyer = {};
-  getSupplierPOs().filter(o=>o.invoice && o.invoice.payments && o.invoice.payments.length && o.createdDate).forEach(o=>{
-    const days = daysBetween(o.createdDate, o.invoice.payments[o.invoice.payments.length-1].date);
+  getSupplierPOs().filter(o=>o.invoice && lastCountedPaymentDate(o) && o.createdDate).forEach(o=>{
+    const days = daysBetween(o.createdDate, lastCountedPaymentDate(o));
     if(days<0) return;
     if(!byBuyer[o.buyerId]) byBuyer[o.buyerId] = {name:o.buyerName, days:[]};
     byBuyer[o.buyerId].days.push(days);
@@ -16028,7 +16373,7 @@ function computeCashPosition(role, start, end){
   orders.forEach(po => {
     getRealPaymentsForPo(po).forEach(p => {
       if(p.date < start || p.date > end) return;
-      if(p.method==='check' && p.checkStatus && p.checkStatus!=='cleared') return; // an uncleared check isn't real cash movement yet
+      if(!paymentIsCounted(p)) return; // an unconfirmed transfer or uncleared check isn't real cash movement yet
       total += p.amount;
       byMethod[p.method] = (byMethod[p.method]||0) + p.amount;
     });
@@ -18717,13 +19062,13 @@ function renderDataCenterImportsTab(){
    HONEST LIMIT: no real payment processor exists or could exist in this
    client-side artifact. "Charging" a card, invoicing, and payment retries
    are simulated as billing-history line items, never presented as an actual
-   transaction. A real build would put a live Stripe/PayMongo integration
-   behind these exact same buttons.
+   transaction. A real build would put a live payment integration behind these
+   exact same buttons.
 ============================================================================ */
 const PLAN_DEFINITIONS = [
   {id:'starter', name:'Starter', priceMonthly:0, tagline:'For a buyer just getting off Viber.', supplierLimit:3, csvImport:false, trialDays:0,
     birDocuments:false, reorderTools:false, financialReports:false, autoReplenishment:false, deliveryRoute:false, creditLimits:false,
-    features:['Up to 3 connected suppliers','Local delivery tracking with signed proof of delivery','In-app chat & order history','Prices you agree on, saved and locked in','Basic stock tracking','Real payments — GCash, Maya, bank transfer, checks']},
+    features:['Up to 3 connected suppliers','Local delivery tracking with signed proof of delivery','In-app chat & order history','Prices you agree on, saved and locked in','Basic stock tracking','Payment tracking — GCash, Maya, bank transfer, checks, with supplier-confirmed receipts']},
   {id:'essential', name:'Essential', priceMonthly:790, tagline:'For a buyer past the first few suppliers.', supplierLimit:10, csvImport:true, trialDays:0,
     birDocuments:true, reorderTools:true, financialReports:false, autoReplenishment:false, deliveryRoute:false, creditLimits:false,
     features:['Up to 10 connected suppliers','Everything in Starter','CSV import for Inventory','BIR-ready Sales Invoices, Delivery Receipts &amp; VAT tracking','One-click reorder &amp; order templates','Email support']},
@@ -19784,23 +20129,23 @@ function generateAccountantStatement(role){
     // e-wallet statement. Mixing invoice-issuance rows and payment rows in one table read as
     // one event when they're really two different things happening on two different dates.
     orders.forEach(o=>(o.invoice&&o.invoice.payments||[]).forEach(p=>{
-      if(p.date>=start && p.date<=end){
-        const collected = (p.method!=='check' || p.checkStatus==='cleared');
+      if(p.date>=start && p.date<=end && p.confirmStatus!=='rejected'){
+        const collected = paymentIsCounted(p);
         if(collected) totalMoneyMoved += p.amount;
-        paymentRows.push({date:p.date, party:o.buyerName, method:PAYMENT_METHOD_LABELS[p.method]||p.method, reference:p.reference||'—', amount:p.amount, status: p.method==='check' ? (p.checkStatus||'pending') : 'cleared'});
+        paymentRows.push({date:p.date, party:o.buyerName, method:PAYMENT_METHOD_LABELS[p.method]||p.method, reference:p.reference||'—', amount:p.amount, status: collected ? 'cleared' : (p.method==='check' && p.checkStatus==='bounced' ? 'bounced' : 'awaiting confirmation')});
       }
     }));
     paymentRows.sort((a,b)=>a.date.localeCompare(b.date));
   } else {
     orders.forEach(o=>(o.invoice&&o.invoice.payments||[]).forEach(p=>{
-      if(p.date>=start && p.date<=end){
+      if(p.date>=start && p.date<=end && p.confirmStatus!=='rejected'){
         // The invoice number ties this to which order it settles, but the actual reconciliation
         // reference (GCash/bank transaction ID, check number) is what an accountant matches
         // against a bank or e-wallet statement — showing only the invoice number here left out
         // the one piece of information reconciliation actually depends on.
         const refLabel = o.invoice.number + (p.reference ? ' · Ref '+p.reference : '');
         rows.push({date:p.date, ref:refLabel, party:o.supplierName, amount:p.amount, note:PAYMENT_METHOD_LABELS[p.method]||p.method});
-        if(p.method!=='check' || p.checkStatus==='cleared') totalMoneyMoved += p.amount;
+        if(paymentIsCounted(p)) totalMoneyMoved += p.amount;
       }
     }));
     rows.sort((a,b)=>a.date.localeCompare(b.date));
@@ -20043,15 +20388,18 @@ function bulkMarkPaidReconcile(){
   ids.forEach(id => {
     const po = getPO(id);
     if(!po || !po.invoice) return;
+    if(viewerSideForPo(po) !== 'supplier') return; // confirming receipt is the receiving side's call
     const {balance} = computeInvoicePayments(po);
     if(balance <= 0.5) return;
     snapshotPO(po);
-    if(!po.invoice.payments) po.invoice.payments = [];
-    po.invoice.payments.push({method:'cash', amount:balance, reference:null, checkDate:null, date:APP_TODAY});
-    po.invoice.status = 'paid';
-    po.invoice.paidOn = APP_TODAY;
-    po.invoice.wasOnTime = APP_TODAY <= po.invoice.dueDate;
-    po.status = 'paid';
+    paymentListFor(po, 'invoice').forEach(p => {
+      if(!paymentNeedsSupplierAction(p)) return;
+      p.confirmStatus = 'confirmed'; p.confirmedAt = APP_TODAY;
+      if(p.method==='check') p.checkStatus = 'cleared';
+    });
+    const rest = computeInvoicePayments(po).balance;
+    if(rest > 0.5) paymentListFor(po, 'invoice').push({id:newRecordId(), method:'cash', amount:rest, reference:null, checkDate:null, date:APP_TODAY, confirmStatus:'confirmed', confirmedAt:APP_TODAY, submittedBy:'supplier'});
+    settleInvoiceStatus(po);
     poLogHistory(po, 'supplier', 'Payment reconciled (bulk) — '+fmtPHP(balance));
     count++;
   });
@@ -20518,8 +20866,8 @@ function promptInstallApp(){
    that piece, already built and deployed separately from this file.
 ============================================================================ */
 let chatNotificationsEnabled = false;
-// Real Web Push, served by the push-subscribe / push-send Supabase Edge Functions (see
-// Section 5's PayMongo functions for the same pattern) instead of the external "nifti-server"
+// Real Web Push, served by the push-subscribe / push-send Supabase Edge Functions instead of
+// the external "nifti-server"
 // this used to point at, which was never actually deployed. Only meaningful for a real signed-in
 // account — demo mode has no real business_id row for a subscription to attach to.
 const NIFTI_VAPID_PUBLIC_KEY = 'BI-nsz29uQ5nj7gckSSJFfSn4WI33nbDJ84dvHWjkgkQRFH2LWIBNwqH6TXMIJNVUROgQuBqw1YYT8nyw-tGUL8';
@@ -20688,6 +21036,7 @@ function collectNiftiPersistableState(){
     currentAppRole, currentUserId, currentLanguage,
     whLabel, supplyLocationLabel,
     taxProfiles,
+    myPaymentAccounts, myPaymentAccountsUpdatedAt,
     sharedContact,
     priceProtectionTally,
     currencyDisplayPref,
@@ -20744,6 +21093,8 @@ function applyNiftiPersistedState(s){
   myCatalog = s.myCatalog || myCatalog;
   myCatalogPublic = (typeof s.myCatalogPublic === 'boolean') ? s.myCatalogPublic : myCatalogPublic;
   taxProfiles = s.taxProfiles || taxProfiles;
+  if(Array.isArray(s.myPaymentAccounts)) myPaymentAccounts = s.myPaymentAccounts;
+  if(s.myPaymentAccountsUpdatedAt) myPaymentAccountsUpdatedAt = s.myPaymentAccountsUpdatedAt;
   // taxProfiles.businessName was already freshly set from the real business's own row in
   // loadMyBusinessContext() (which runs before this) — most of taxProfiles (TIN, RDO code,
   // registeredAddress, VAT status) has no Supabase backing at all and genuinely needs the local
@@ -21064,7 +21415,6 @@ async function bootNifti(){
     retryPendingPriceAgreements(); // picks up anything still unsynced from before this reload if we're already back online
     applyRealAccountUI();
     navigate('dashboard');
-    handlePaymentResultHash(); // after navigate('dashboard') so a #payment-result redirect's own navigate('orders') is the one that actually sticks
   }
 }
 bootNifti();
