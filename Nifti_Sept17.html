@@ -11674,7 +11674,7 @@ function renderPaymentPanel(id){
 // Lands a buyer back from a PayMongo checkout redirect somewhere that actually tells them
 // something, instead of the hash silently doing nothing (confirmed via a earlier grep: nothing in
 // this file ever read #payment-result before now). create-gcash-payment/create-maya-payment both
-// set their PayMongo redirect/return_url to `${origin}/#payment-result?po=<id>&status=<...>`.
+// set their PayMongo redirect/return_url to `${paymentReturnBase()}#payment-result?po=<id>&status=<...>`.
 // Deliberately does NOT claim the payment is confirmed paid here — completing the GCash/Maya
 // approval step only means PayMongo is now processing it; the webhook (paymongo-webhook, verified
 // against PayMongo's own signature) is the only thing that actually marks the invoice paid, and
@@ -11710,7 +11710,7 @@ async function startGcashPayment(id, btn){
   if(btn){ if(btn.disabled) return; btn.disabled = true; btn.textContent = 'Starting payment…'; }
   const errEl = document.getElementById('gcashPayError_'+id);
   if(errEl) errEl.textContent = '';
-  const { data, error } = await sb.functions.invoke('create-gcash-payment', { body: { po_id: id } });
+  const { data, error } = await sb.functions.invoke('create-gcash-payment', { body: { po_id: id, return_base: paymentReturnBase() } });
   if(error || !data || data.error){
     if(errEl) errEl.textContent = (data && data.error) || (error && error.message) || 'Could not start payment. Try again.';
     if(btn){ btn.disabled = false; btn.textContent = `Pay ${fmtPHP(computeInvoicePayments(getPO(id)).balance)} with GCash →`; }
@@ -11718,12 +11718,17 @@ async function startGcashPayment(id, btn){
   }
   window.location.href = data.checkout_url; // real PayMongo (test mode) GCash checkout
 }
+// Full URL of this page (minus query/hash), so PayMongo can send the buyer back to the app itself.
+// The payment functions used to build that return link from the request's Origin header alone,
+// which has no path -- on GitHub Pages (served under /SadieCutie/) every buyer landed on a 404
+// right after paying. The functions only honor this if it's the production site or localhost.
+function paymentReturnBase(){ return location.origin + location.pathname; }
 async function startMayaPayment(id, btn){
   if(!requirePermission('markInvoicePaid')) return; // see startGcashPayment for why
   if(btn){ if(btn.disabled) return; btn.disabled = true; btn.textContent = 'Starting payment…'; }
   const errEl = document.getElementById('mayaPayError_'+id);
   if(errEl) errEl.textContent = '';
-  const { data, error } = await sb.functions.invoke('create-maya-payment', { body: { po_id: id } });
+  const { data, error } = await sb.functions.invoke('create-maya-payment', { body: { po_id: id, return_base: paymentReturnBase() } });
   if(error || !data || data.error){
     if(errEl) errEl.textContent = (data && data.error) || (error && error.message) || 'Could not start payment. Try again.';
     if(btn){ btn.disabled = false; btn.textContent = `Pay ${fmtPHP(computeInvoicePayments(getPO(id)).balance)} with Maya →`; }
