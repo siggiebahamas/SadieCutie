@@ -1769,7 +1769,7 @@
 
 <section class="plans">
   <div class="wrap">
-    <div class="plan-grid" id="marketingPlanGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;"></div>
+    <div class="plan-grid" id="marketingPlanGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;max-width:780px;margin:0 auto;"></div>
     <div class="supplier-banner">
       <div><div class="txt">Suppliers use Nifti free, forever.</div><div class="sub">No tier, no listing fee, no plan to pick — it never converts to paid. Just accept an invite and you're in.</div></div>
     </div>
@@ -1782,7 +1782,7 @@
     <div class="faq-item"><div class="q">I'm a supplier — do I need to choose a plan?</div><div class="a">No. None of this page applies to you. Accept your buyer's invite, set up your product list, and you're using Nifti free — no card, no tier, ever.</div></div>
     <div class="faq-item"><div class="q">Can my competitors see who I order from?</div><div class="a">No. Connections stay private by default, even with Discover on — protection is never automatic, you lift it per relationship.</div></div>
     <div class="faq-item"><div class="q">Do my suppliers need to pay anything?</div><div class="a">Never. Suppliers use Nifti free regardless of your plan — that's exactly why they say yes to your invite.</div></div>
-    <div class="faq-item"><div class="q">What happens if I outgrow Starter?</div><div class="a">You'll see it coming before you hit the limit. Upgrading is one click, no data loss.</div></div>
+    <div class="faq-item"><div class="q">What happens if I go past 15 suppliers?</div><div class="a">You'll see it coming before you hit the limit. Everything you already have stays. Moving to Pro is one click, and nothing is lost.</div></div>
     <div class="faq-item"><div class="q">What happens to my existing orders and suppliers if I downgrade?</div><div class="a">Nothing is deleted, ever. If you go over a lower plan's supplier limit, your existing connections and full order history stay exactly as they are — you just can't add new supplier connections beyond the limit until you upgrade again or disconnect one.</div></div>
   </div>
 </section>
@@ -19066,15 +19066,17 @@ function renderDataCenterImportsTab(){
    exact same buttons.
 ============================================================================ */
 const PLAN_DEFINITIONS = [
-  {id:'starter', name:'Starter', priceMonthly:0, tagline:'For a buyer just getting off Viber.', supplierLimit:3, csvImport:false, trialDays:0,
-    birDocuments:false, reorderTools:false, financialReports:false, autoReplenishment:false, deliveryRoute:false, creditLimits:false,
-    features:['Up to 3 connected suppliers','Local delivery tracking with signed proof of delivery','In-app chat & order history','Prices you agree on, saved and locked in','Basic stock tracking','Payment tracking — GCash, Maya, bank transfer, checks, with supplier-confirmed receipts']},
-  {id:'essential', name:'Essential', priceMonthly:790, tagline:'For a buyer past the first few suppliers.', supplierLimit:10, csvImport:true, trialDays:0,
+  {id:'starter', name:'Free', priceMonthly:0, tagline:'Everything you need to move your suppliers off Viber.', supplierLimit:15, csvImport:false, trialDays:0,
+    birDocuments:false, reorderTools:true, financialReports:false, autoReplenishment:false, deliveryRoute:false, creditLimits:false,
+    features:['Up to 15 connected suppliers','Unlimited orders, chat &amp; order history','Prices you agree on, saved and locked in','Payment tracking (GCash, Maya, bank, checks), confirmed by your supplier','Delivery tracking with signed proof of delivery','One-tap reorder &amp; order templates','Basic stock tracking']},
+  // Hidden from every plan listing (see VISIBLE_PLAN_DEFINITIONS) — kept only so any record still
+  // pointing at it resolves. Same supplier limit as Free, so it's never a step down.
+  {id:'essential', name:'Essential', priceMonthly:790, tagline:'Retired plan.', supplierLimit:15, csvImport:true, trialDays:0,
     birDocuments:true, reorderTools:true, financialReports:false, autoReplenishment:false, deliveryRoute:false, creditLimits:false,
-    features:['Up to 10 connected suppliers','Everything in Starter','CSV import for Inventory','BIR-ready Sales Invoices, Delivery Receipts &amp; VAT tracking','One-click reorder &amp; order templates','Email support']},
-  {id:'growth', name:'Growth', priceMonthly:1990, tagline:'For a buyer managing real volume.', supplierLimit:null, csvImport:true, trialDays:14, featured:true,
+    features:['Up to 15 connected suppliers','Everything in Free','CSV import for Inventory','BIR-ready Sales Invoices, Delivery Receipts &amp; VAT tracking']},
+  {id:'growth', name:'Pro', priceMonthly:990, tagline:'For more than 15 suppliers, or when you want the numbers.', supplierLimit:null, csvImport:true, trialDays:30, featured:true,
     birDocuments:true, reorderTools:true, financialReports:true, autoReplenishment:true, deliveryRoute:false, creditLimits:false,
-    features:['Unlimited connected suppliers','Everything in Essential','Step-by-step import & customs tracking','Multiple storage locations & expiry tracking','Aging report, credit terms &amp; cash-flow math','Nifti drafts your reorders before you ask','Full profit & stock-health reports','Get a quote before you commit to an order','Priority support']},
+    features:['Unlimited connected suppliers','Everything in Free','BIR-ready Sales Invoices, Delivery Receipts &amp; VAT tracking','Nifti drafts your reorders before you run out','Profit, stock-health &amp; cash-flow reports','Import &amp; customs tracking','Multiple storage locations &amp; expiry tracking','CSV import for Inventory','Priority support']},
   {id:'business', name:'Business', priceMonthly:4990, tagline:'For distributors and multi-location operations.', supplierLimit:null, csvImport:true, trialDays:14,
     birDocuments:true, reorderTools:true, financialReports:true, autoReplenishment:true, deliveryRoute:true, creditLimits:true,
     features:['Everything in Growth','Manage multiple branches from one account','Connect Nifti to your other business software','Dedicated account manager']},
@@ -19086,7 +19088,7 @@ const PLAN_DEFINITIONS = [
 // entry for the free-forever supplier promise — see its comment) but are hidden from every
 // buyer-facing plan listing for now. Nothing in PLAN_DEFINITIONS itself changes, so re-enabling
 // later is just removing this filter, not rebuilding the tiers.
-const VISIBLE_PLAN_DEFINITIONS = PLAN_DEFINITIONS.filter(p => ['starter','essential','growth'].includes(p.id));
+const VISIBLE_PLAN_DEFINITIONS = PLAN_DEFINITIONS.filter(p => ['starter','growth'].includes(p.id)); // two choices, not three: Free or Pro
 const PLAN_ANNUAL_DISCOUNT = 0.17; // "Yearly — save ~17%", matches the existing pricing-page toggle copy
 function planAnnualMonthlyEquivalent(plan){ return plan.priceMonthly==null ? null : Math.round(plan.priceMonthly*(1-PLAN_ANNUAL_DISCOUNT)); }
 function getPlanDef(id){ return PLAN_DEFINITIONS.find(p=>p.id===id) || PLAN_DEFINITIONS[0]; }
@@ -19245,9 +19247,9 @@ function renderBillingSettings(){
   let statusBanner = '';
   if(sub.status==='trialing' && trialDays!=null){
     statusBanner = `<div style="background:var(--green-soft);border:1px solid var(--green);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:15px;color:var(--green-hover);font-weight:700;">Free trial of ${currentPlan.name} — ${trialDays} day${trialDays===1?'':'s'} left, then ${fmtPHP(currentPlan.priceMonthly)}/month unless you cancel.</div>`;
-    if(trialDays===0) statusBanner = `<div style="background:var(--danger-soft);border:1px solid var(--danger);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:15px;color:#7A2A20;font-weight:700;">Your ${currentPlan.name} trial has ended — you're back on Starter entitlements until you pick a plan below.</div>`;
+    if(trialDays===0) statusBanner = `<div style="background:var(--danger-soft);border:1px solid var(--danger);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:15px;color:#7A2A20;font-weight:700;">Your ${currentPlan.name} trial has ended — you're back on the Free plan until you pick a plan below.</div>`;
   } else if(sub.status==='cancelled'){
-    statusBanner = `<div style="background:var(--warn-soft);border:1px solid var(--warn);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:15px;color:#7A4E10;font-weight:700;">Your ${currentPlan.name} subscription is cancelled — you're on Starter entitlements. Nothing was deleted; pick a plan below to resubscribe.</div>`;
+    statusBanner = `<div style="background:var(--warn-soft);border:1px solid var(--warn);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:15px;color:#7A4E10;font-weight:700;">Your ${currentPlan.name} subscription is cancelled — you're on the Free plan. Nothing was deleted; pick a plan below to resubscribe.</div>`;
   }
   el.innerHTML = `
     <div class="sub">You're currently on the <strong>${currentPlan.name}</strong> plan${sub.status==='trialing'?' (trial)':''}${effectivePlan.id!==currentPlan.id?' — enforcing as '+effectivePlan.name+' right now':''}.</div>
@@ -19267,7 +19269,7 @@ function renderBillingSettings(){
         <table style="width:100%;"><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead>
         <tbody>${[...sub.billingHistory].reverse().map(h=>`<tr><td>${h.date}</td><td>${h.description}</td><td>${h.amount>0?fmtPHP(h.amount):'—'}</td><td>${h.status}</td></tr>`).join('')}</tbody></table>
         <button class="btn btn-outline" style="margin-top:10px;padding:7px 14px;font-size:14px;" onclick="exportBillingHistory()">⬇ Export CSV</button>
-      ` : `<div style="font-size:15px;color:var(--ink);opacity:.7;">No billing activity yet — you're on the free Starter plan.</div>`}
+      ` : `<div style="font-size:15px;color:var(--ink);opacity:.7;">No billing activity yet — you're on the Free plan.</div>`}
     </div>
   `;
 }
@@ -19343,7 +19345,7 @@ function confirmCancelSubscription(){
   document.getElementById('cancelSubForm').innerHTML = '';
   scheduleNiftiSave();
   renderBillingSettings();
-  showToast('Subscription cancelled. You\'re on Starter going forward.', 'success');
+  showToast('Subscription cancelled. You\'re on the Free plan going forward.', 'success');
 }
 
 /* ============================================================================
