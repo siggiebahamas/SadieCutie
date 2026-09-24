@@ -2006,7 +2006,7 @@
   <h1 style="margin-bottom:6px;">Privacy Policy</h1>
   <p style="font-size:14.5px;color:var(--ink);opacity:.7;margin-bottom:16px;">Last updated: September 22, 2026 · Effective for pilot use of Nifti</p>
   <div style="background:var(--warn-soft);border:1px solid var(--warn);border-radius:10px;padding:16px 18px;margin:14px 0 24px;font-size:15px;color:#7A4E10;line-height:1.6;">
-    <strong>This describes what Nifti actually does today, for a small pilot.</strong> It has not been reviewed by a lawyer. It is written to be accurate and honest about real data handling, but before Nifti is opened beyond a small group of trusted pilot users, get this reviewed by counsel familiar with the Philippine Data Privacy Act (RA 10173) — especially given real payment data is involved. Nothing here is legal advice.
+    <strong>This describes what Nifti actually does today, for a small pilot.</strong> It is written to be accurate about how your data is really handled. Nothing here is legal advice.
   </div>
 
   <h2 style="font-size:20px;margin-bottom:10px;">What data we collect</h2>
@@ -2057,7 +2057,7 @@
   <h1 style="margin-bottom:6px;">Terms of Service</h1>
   <p style="font-size:14.5px;color:var(--ink);opacity:.7;margin-bottom:16px;">Last updated: September 22, 2026 · Effective for pilot use of Nifti</p>
   <div style="background:var(--warn-soft);border:1px solid var(--warn);border-radius:10px;padding:16px 18px;margin:14px 0 24px;font-size:15px;color:#7A4E10;line-height:1.6;">
-    <strong>This is a working draft for a small pilot, not lawyer-reviewed language.</strong> It's written to be a real, usable agreement for pilot users — get it reviewed by counsel before opening Nifti beyond a small trusted group, particularly given real payments are processed through it. Nothing here is legal advice.
+    <strong>These terms cover pilot use of Nifti.</strong> Nifti never holds or moves your money: buyers pay suppliers directly, and Nifti only records what each side says was paid and confirmed. Nothing here is legal advice.
   </div>
 
   <h2 style="font-size:20px;margin-bottom:10px;">1. Acceptance of terms</h2>
@@ -3068,6 +3068,12 @@
       <!-- ===== PAGE: SETTINGS ===== -->
       <div id="page-settings" class="app-page">
         <div class="page-head"><h1 data-i18n="head_settings">Settings</h1><p>Manage your business profile, privacy, and connected partners.</p></div>
+
+        <div class="settings-card hidden" id="ownerEmailCard">
+          <h2>📧 Email sending <span style="font-size:13px;font-weight:700;opacity:.6;">(only you see this)</span></h2>
+          <div class="sub">Nifti sends password resets, email alerts, morning summaries and Help messages from a Gmail account. Free, about 500 emails a day. One-time setup, about 2 minutes.</div>
+          <div id="ownerEmailContent"></div>
+        </div>
 
         <h3 class="settings-section-title">Your business</h3>
 
@@ -5792,7 +5798,13 @@ async function sendPasswordReset(){
   const email = (document.getElementById('resetEmail')||{}).value ? document.getElementById('resetEmail').value.trim() : '';
   const out = document.getElementById('recoveryResult');
   if(!email){ out.style.color = 'var(--danger)'; out.textContent = 'Enter the email you signed up with.'; return; }
-  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: appBaseUrl() });
+  let error = null;
+  try{
+    const { data, error: fnErr } = await sb.functions.invoke('auth-email', { body: { email } });
+    if(fnErr || !data || data.fallback){
+      ({ error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: appBaseUrl() }));
+    } else if(!data.ok){ error = {message: data.error || 'please try again'}; }
+  }catch(e){ ({ error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: appBaseUrl() })); }
   out.style.color = error ? 'var(--danger)' : 'var(--green)';
   out.textContent = error ? ("Couldn't send the email: " + error.message) : 'Check your email for a link to set a new password. It can take a minute.';
 }
@@ -6975,6 +6987,77 @@ function renderPhoneNotifNudge(){
   head.after(card);
 }
 
+/* ============ EMAIL SENDING SETUP (Nifti owner only) ============
+   Nifti sends its emails (password resets, alerts, morning summaries, Help messages) through a
+   Gmail account using a Google "app password". Only the Nifti owner sees this card; the password
+   is write-only (never sent back to the browser). */
+let emailSenderStatus = null;
+async function renderOwnerEmailCard(){
+  const card = document.getElementById('ownerEmailCard');
+  if(!card) return;
+  if(!myBusiness){ card.classList.add('hidden'); return; }
+  const { data } = await sb.rpc('email_sender_status');
+  emailSenderStatus = data || {is_admin: false};
+  if(!emailSenderStatus.is_admin){ card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  const el = document.getElementById('ownerEmailContent');
+  if(emailSenderStatus.configured && !window._ownerEmailEditing){
+    el.innerHTML = `<div class="notif-phone on">✓ Sending from ${escapeHtml(emailSenderStatus.user)}${emailSenderStatus.support_inbox ? ` · Help messages go to ${escapeHtml(emailSenderStatus.support_inbox)}` : ''}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn btn-outline" style="padding:8px 14px;" onclick="sendOwnerTestEmail()">Send me a test email</button>
+        <button class="btn btn-outline" style="padding:8px 14px;" onclick="window._ownerEmailEditing = true; renderOwnerEmailCard()">Change</button>
+        <button class="btn btn-outline" style="padding:8px 14px;color:var(--danger);border-color:var(--danger);" onclick="clearOwnerEmailSender()">Turn off</button>
+      </div><div id="ownerEmailResult" style="margin-top:10px;"></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="ios-steps">
+      <div class="ios-step"><span class="ios-num">1</span><div>Sign in to the Gmail you want Nifti to send from. A separate one like <em>nifti.support@gmail.com</em> is best. <a href="https://accounts.google.com/signup" target="_blank" rel="noopener">Make one</a></div></div>
+      <div class="ios-step"><span class="ios-num">2</span><div><a class="btn btn-outline" style="padding:6px 12px;font-size:14px;text-decoration:none;" href="https://myaccount.google.com/signinoptions/twosv" target="_blank" rel="noopener">Turn on 2-Step Verification →</a><div style="font-size:13px;opacity:.7;margin-top:3px;">Google requires this before step 3. Skip if it's already on.</div></div></div>
+      <div class="ios-step"><span class="ios-num">3</span><div><a class="btn btn-primary" style="padding:6px 12px;font-size:14px;text-decoration:none;" href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">Create an app password →</a><div style="font-size:13px;opacity:.7;margin-top:3px;">Name it "Nifti", tap Create, and copy the 16-letter code. Check the photo at the top right is the right Gmail.</div></div></div>
+      <div class="ios-step"><span class="ios-num">4</span><div style="flex:1;">Paste them here:
+        <div class="field" style="margin-top:6px;"><label>Gmail address</label><input id="oeUser" type="email" autocomplete="off" placeholder="nifti.support@gmail.com" value="${escapeHtml((emailSenderStatus && emailSenderStatus.user) || '')}"></div>
+        <div class="field"><label>16-letter app password</label><input id="oePass" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="abcd efgh ijkl mnop"></div>
+        <div class="field"><label>Send Help messages to (optional)</label><input id="oeInbox" type="email" autocomplete="off" placeholder="Leave blank to use the Gmail above"></div>
+        <button class="btn btn-primary" onclick="saveOwnerEmailSender()">Save and send a test email</button>
+        ${emailSenderStatus.configured ? `<span class="row-action" style="margin-left:10px;" onclick="window._ownerEmailEditing = false; renderOwnerEmailCard()">Cancel</span>` : ''}
+      </div></div>
+    </div>
+    <div id="ownerEmailResult" style="margin-top:10px;"></div>`;
+}
+async function saveOwnerEmailSender(){
+  const u = document.getElementById('oeUser').value.trim(), p = document.getElementById('oePass').value, inbox = document.getElementById('oeInbox').value.trim();
+  const out = document.getElementById('ownerEmailResult');
+  const { error } = await sb.rpc('set_email_sender', {p_user: u, p_pass: p, p_support_inbox: inbox || null});
+  if(error){ out.innerHTML = `<div class="notif-phone warn">${escapeHtml(error.message)}</div>`; return; }
+  window._ownerEmailEditing = false;
+  await renderOwnerEmailCard();
+  sendOwnerTestEmail();
+}
+async function sendOwnerTestEmail(){
+  const out = document.getElementById('ownerEmailResult');
+  out.innerHTML = '<div class="notif-phone">Sending a test email…</div>';
+  const { data: id, error } = await sb.rpc('send_test_email');
+  if(error){ out.innerHTML = `<div class="notif-phone warn">${escapeHtml(error.message)}</div>`; return; }
+  for(let i = 0; i < 15; i++){
+    await new Promise(r => setTimeout(r, 2000));
+    const { data: row } = await sb.from('notification_outbox').select('sent_at, error').eq('id', id).maybeSingle();
+    if(row && row.sent_at){
+      const to = (emailSenderStatus && (emailSenderStatus.support_inbox || emailSenderStatus.user)) || 'your inbox';
+      out.innerHTML = row.error
+        ? `<div class="notif-phone warn">Google didn't accept it (${escapeHtml(row.error)}). Usually the app password was mistyped or 2-Step Verification is off. Tap Change and paste a fresh code.</div>`
+        : `<div class="notif-phone on">✓ Test email sent to ${escapeHtml(to)}. Check the inbox (and Spam the first time). Password resets, alerts and Help messages now work.</div>`;
+      return;
+    }
+  }
+  out.innerHTML = `<div class="notif-phone warn">Still sending. Check your inbox in a minute; if nothing arrives, tap Change and paste a fresh app password.</div>`;
+}
+async function clearOwnerEmailSender(){
+  if(!confirm('Turn off email sending? Password resets, email alerts and Help messages will stop.')) return;
+  const { error } = await sb.rpc('clear_email_sender');
+  if(error){ showToast(error.message, 'error'); return; }
+  renderOwnerEmailCard();
+}
+
 function renderSidebarForViewAsRole(){
   const allowed = computeAllowedPages(getEffectiveRoles());
   document.querySelectorAll('.nav-item[data-page], .bnav-item[data-page], .more-sheet-item[data-page]').forEach(el => {
@@ -7097,7 +7180,7 @@ function navigate(page){
     if(page==='suppliers'){ renderSupplierChips(); renderSuppliersTable(); }
     if(page==='invite'){ renderInvitesList(); updatePreview(); }
     if(page==='status') renderStatusPage();
-    if(page==='settings'){ renderPauseCard(); renderSharedContactCard(); renderLogisticsPartnersCard(); renderShareLinksCard(); { const qs = document.getElementById('quickShareToggle'); if(qs) qs.classList.toggle('on', quickSharePromptOn()); } document.querySelectorAll('.buyerPublicToggle').forEach(t => t.classList.toggle('on', myBusiness ? !!myBusiness.catalog_public : (currentAppRole==='supplier' ? myCatalogPublic : myBuyerProfilePublic))); renderTeamMembersList(); renderCustomRolesList(); renderBillingSettings(); renderNotificationSettingsPanel(); renderPushLogPanel(); renderTaxProfileSettings(); renderPaymentDetailsSettings(); renderBirDeadlineCard(); renderApprovalThresholdSettings(); renderAuditLogContent(); renderDownstreamSalesSettingsCard(); renderSupportContactForm(); }
+    if(page==='settings'){ renderOwnerEmailCard(); renderPauseCard(); renderSharedContactCard(); renderLogisticsPartnersCard(); renderShareLinksCard(); { const qs = document.getElementById('quickShareToggle'); if(qs) qs.classList.toggle('on', quickSharePromptOn()); } document.querySelectorAll('.buyerPublicToggle').forEach(t => t.classList.toggle('on', myBusiness ? !!myBusiness.catalog_public : (currentAppRole==='supplier' ? myCatalogPublic : myBuyerProfilePublic))); renderTeamMembersList(); renderCustomRolesList(); renderBillingSettings(); renderNotificationSettingsPanel(); renderPushLogPanel(); renderTaxProfileSettings(); renderPaymentDetailsSettings(); renderBirDeadlineCard(); renderApprovalThresholdSettings(); renderAuditLogContent(); renderDownstreamSalesSettingsCard(); renderSupportContactForm(); }
   }
   window.scrollTo(0,0);
 }

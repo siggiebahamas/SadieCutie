@@ -1,0 +1,25 @@
+name: Keep the Nifti database awake
+
+# Supabase's free plan pauses a project after 7 days with no traffic. This makes one tiny,
+# read-only request every 2 days (the same health check the Status page uses) so a quiet week
+# during the pilot never takes Nifti offline. Free: a few seconds of GitHub Actions time.
+on:
+  schedule:
+    - cron: "23 1 */2 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the database
+        run: |
+          code=$(curl -sS -o /tmp/out.json -w "%{http_code}" -X POST \
+            "https://ctryvcloavfpecbrbzxy.supabase.co/rest/v1/rpc/nifti_health" \
+            -H "apikey: sb_publishable_oWW-IMSOeNNFiQDjUnpWdQ_hlezb7wS" \
+            -H "Content-Type: application/json" -d '{}')
+          cat /tmp/out.json; echo
+          test "$code" = "200"
