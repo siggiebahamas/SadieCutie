@@ -3261,24 +3261,6 @@
   </div>
 </div>
 
-<!-- Sentry (github.com/getsentry/sentry-javascript) — a real error-monitoring dashboard with
-     alerting, on top of the bare client_error_log table below. Free tier: 5,000 errors/month, no
-     credit card. To activate: create a free project at https://sentry.io (Platform: Browser
-     JavaScript), copy its DSN from Settings → Client Keys (DSN), and paste it in place of the
-     placeholder below. Until then this silently no-ops — nothing else on the page depends on it. -->
-<script src="https://cdn.jsdelivr.net/npm/@sentry/browser@8/build/bundle.min.js" crossorigin="anonymous"></script>
-<script>
-const NIFTI_SENTRY_DSN = 'REPLACE_WITH_YOUR_SENTRY_DSN';
-if(window.Sentry && NIFTI_SENTRY_DSN.indexOf('REPLACE_WITH') === -1){
-  try{
-    Sentry.init({
-      dsn: NIFTI_SENTRY_DSN,
-      environment: (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'development' : 'production',
-      tracesSampleRate: 0, // errors only, no performance tracing — keeps usage well inside the free tier
-    });
-  }catch(e){ console.warn('Sentry init failed:', e); }
-}
-</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============ SUPABASE AUTH ============ */
@@ -3343,11 +3325,6 @@ async function loadMyBusinessContext(){
   myBusiness = tm.businesses;
   currentAppRole = myBusiness.type; // 'buyer' or 'supplier' — fixed by the account, not togglable
   currentUserId = tm.id;
-  // Tags Sentry's own automatically-captured errors with who hit them, instead of a manual
-  // Sentry.captureException call inside logClientError below — which would double-report every
-  // error (once from Sentry's own global handlers, once manually), burning through the free
-  // tier's monthly quota twice as fast for no extra signal.
-  if(window.Sentry) Sentry.setUser({ id: myBusiness.id, email: user.email, username: myBusiness.name });
   if(myBusiness.type === 'buyer') ME_BUYER = myBusiness.id; else ME_SUPPLIER = myBusiness.id;
   // approvalThreshold used to live in local storage only — never reached a teammate's own device,
   // so the spending-approval control was silently bypassed for anyone not on the device that set
@@ -5477,7 +5454,39 @@ function syncBottomNavBadges(){
   const n = [inv, team].reduce((sum, b) => sum + ((b && b.style.display !== 'none') ? (parseInt(b.textContent, 10) || 0) : 0), 0);
   const more = document.getElementById('bnavMoreBadge');
   if(more){ more.style.display = n ? '' : 'none'; more.textContent = n; }
+  updateAttentionSignal();
 }
+// Works in any browser tab, including iPhone Safari where background notifications aren't
+// allowed: the tab title shows "(3) Nifti" and a short ding plays when new orders or messages
+// arrive while you're looking at another tab or app (the sound needs one tap on the page first,
+// a browser rule).
+let attnLastCount = null, attnAudio = null;
+function attentionCount(){
+  return ['ordersNavBadge','messagesNavBadge'].reduce((sum, id) => { const b = document.getElementById(id); return sum + ((b && b.style.display !== 'none') ? (parseInt(b.textContent, 10) || 0) : 0); }, 0);
+}
+function playAttentionDing(){
+  try{
+    if(!attnAudio) return;
+    const o = attnAudio.createOscillator(), g = attnAudio.createGain();
+    o.type = 'sine'; o.frequency.value = 880;
+    g.gain.setValueAtTime(0.0001, attnAudio.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.25, attnAudio.currentTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, attnAudio.currentTime + 0.35);
+    o.connect(g).connect(attnAudio.destination); o.start(); o.stop(attnAudio.currentTime + 0.4);
+  }catch(e){}
+}
+function updateAttentionSignal(){
+  const count = attentionCount();
+  if(attnLastCount !== null && count > attnLastCount && document.hidden) playAttentionDing();
+  attnLastCount = count;
+  const base = document.title.replace(/^\(\d+\)\s*/, '');
+  document.title = (document.hidden && count) ? `(${count}) ${base}` : base;
+}
+document.addEventListener('visibilitychange', () => { if(!document.hidden) document.title = document.title.replace(/^\(\d+\)\s*/, ''); else updateAttentionSignal(); });
+document.addEventListener('pointerdown', function unlockDing(){
+  try{ const AC = window.AudioContext || window.webkitAudioContext; if(AC){ attnAudio = new AC(); if(attnAudio.resume) attnAudio.resume(); } }catch(e){}
+  document.removeEventListener('pointerdown', unlockDing);
+});
 function initBottomNav(){
   const watch = ['ordersNavBadge','messagesNavBadge','inventoryNavBadge','teamNavBadge'].map(id => document.getElementById(id)).filter(Boolean);
   if(window.MutationObserver){
@@ -6255,7 +6264,7 @@ async function renderPushLogPanel(){
   const el = document.getElementById('pushLogContent');
   if(!el) return;
   if(!myBusiness){ el.innerHTML = '<div style="font-size:14px;opacity:.7;">Sign in to see notifications sent to your business.</div>'; return; }
-  const { data, error } = await sb.from('notification_outbox').select('title, body, created_at, sent_at, error').eq('business_id', myBusiness.id).order('id', {ascending:false}).limit(15);
+  const { data, error } = await sb.from('notification_outbox').select('title, body, created_at, sent_at, error').eq('business_id', myBusiness.id).or('category.is.null,category.neq.support').order('id', {ascending:false}).limit(15);
   if(error){ el.innerHTML = ''; return; }
   el.innerHTML = (data && data.length) ? data.map(n => `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
       <div style="font-weight:700;font-size:14.5px;">${escapeHtml(n.title)}</div>
@@ -6920,10 +6929,12 @@ function iosInstallStepsHtml(){
     <div class="ios-step"><span class="ios-num">2</span><div>Scroll down and tap <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</div></div>
     <div class="ios-step"><span class="ios-num">3</span><div>Open <strong>Nifti</strong> from your Home Screen, sign in once, and tap <strong>Turn on notifications</strong>.</div></div>
   </div>
-  <div style="font-size:13px;opacity:.7;margin-top:6px;">Takes 20 seconds, only once. Apple only sends web notifications to apps on the Home Screen.</div>`;
+  <div style="font-size:13px;opacity:.7;margin-top:6px;">Takes 20 seconds, only once. Apple only sends web notifications to apps on the Home Screen.</div>
+  ${emailNotifAvailable ? `<div style="font-size:14px;margin-top:8px;">Rather not? <span class="row-action" onclick="document.getElementById('iosGuideModal')?.remove(); navigate('settings'); setTimeout(()=>{ const e = document.getElementById('notifEmailOn'); if(e) e.scrollIntoView({block:'center'}); }, 400);">Get the same alerts by email instead →</span></div>` : ''}`;
 }
-function openIosInstallGuide(){
+async function openIosInstallGuide(){
   if(document.getElementById('iosGuideModal')) return;
+  if(myBusiness && !serverNotifPrefs) await loadServerNotifPrefs();
   const m = document.createElement('div');
   m.className = 'share-modal-backdrop'; m.id = 'iosGuideModal';
   m.onclick = e => { if(e.target === m) m.remove(); };
