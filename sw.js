@@ -29,12 +29,17 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const url = (event.notification.data && event.notification.data.url) || './';
+  // Open (or bring forward) Nifti on the screen the notification is about, e.g. ./#messages.
+  const target = new URL(url, self.registration.scope).href;
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
       for (const client of clients) {
-        if ('focus' in client) return client.focus();
+        if ('focus' in client) {
+          client.postMessage({ type: 'nifti-open', url: target });
+          return client.focus();
+        }
       }
-      if (self.clients.openWindow) return self.clients.openWindow(url);
+      if (self.clients.openWindow) return self.clients.openWindow(target);
     })
   );
 });

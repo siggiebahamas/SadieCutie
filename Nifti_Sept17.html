@@ -705,6 +705,7 @@
 
 
 
+  .settings-card:empty{display:none;}
   .settings-section-title{font-family:var(--font-h);font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);opacity:.6;margin:28px 0 10px;}
 
   /* ---- Share buttons / order links ---- */
@@ -755,6 +756,10 @@
   .paste-name{width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;box-sizing:border-box;}
   .paste-price{width:92px;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;}
   .paste-hint{font-size:12.5px;opacity:.75;margin-top:3px;}
+
+  .notif-phone{font-size:14.5px;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--border);}
+  .notif-phone.on{background:var(--green-soft);border-color:var(--green);color:var(--green);font-weight:700;}
+  .notif-phone.warn{background:var(--lowstock-soft);border-color:var(--lowstock-fill);}
   /* ---- Team page ---- */
   .team-people{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 12px;margin-bottom:6px;scrollbar-width:none;}
   .team-people::-webkit-scrollbar{display:none;}
@@ -2826,6 +2831,7 @@
           <div><div class="txt" id="discToggleTxt">Allow new suppliers to find you here</div><div class="sub" id="discToggleSub">Off by default. Turning this on shows your business profile only — never your suppliers, pricing, or order history.</div></div>
           <div class="switch" id="discPublicToggle" onclick="handleDiscPublicToggle()"><div class="knob"></div></div>
         </div>
+        <div id="discProfileForm"></div>
         <div class="panel-card" style="margin-bottom:20px;">
           <div id="discoveryLeadsContent"></div>
         </div>
@@ -3103,6 +3109,18 @@
           <div id="birDeadlineContent"></div>
         </div>
 
+        <div class="settings-card">
+          <h2>📞 Your contact for partners</h2>
+          <div class="sub">Shown on the order and delivery links you send, so suppliers and drivers know who to call and where to go.</div>
+          <div id="sharedContactContent"></div>
+        </div>
+
+        <div class="settings-card">
+          <h2>🚚 Delivery partners</h2>
+          <div class="sub">Drivers, riders and couriers you use. From any confirmed order, tap "Send to a delivery partner" to give them a link with the items and address (no prices). They tap Picked up and Delivered, and you both get notified.</div>
+          <div id="logisticsPartnersContent"></div>
+        </div>
+
         <h3 class="settings-section-title">People</h3>
 
         <div class="settings-card">
@@ -3132,10 +3150,13 @@
         <div class="settings-card">
           <h2>Notifications</h2>
           <div id="notifSettingsContent"></div>
-          <div style="font-weight:800;font-size:15px;margin:16px 0 4px;">Notify me about</div>
-          <div class="toggle-row"><div><div class="toggle-txt">Order status changes</div></div><div class="switch on" id="notifToggleOrders" onclick="toggleNotificationSetting('orderUpdates', this)"><div class="knob"></div></div></div>
-          <div class="toggle-row"><div><div class="toggle-txt">Price changes on saved items</div></div><div class="switch on" id="notifTogglePrice" onclick="toggleNotificationSetting('priceChanges', this)"><div class="knob"></div></div></div>
-          <div class="toggle-row"><div><div class="toggle-txt">New messages</div></div><div class="switch on" id="notifToggleMessages" onclick="toggleNotificationSetting('newMessages', this)"><div class="knob"></div></div></div>
+          <div style="font-weight:800;font-size:15px;margin:20px 0 4px;">Recent notifications</div>
+          <div id="pushLogContent"></div>
+        </div>
+
+        <div class="settings-card">
+          <h2>💬 Viber &amp; WhatsApp</h2>
+          <div class="toggle-row"><div><div class="toggle-txt">After I send an order, offer a one-tap Viber/WhatsApp send</div><div class="toggle-sub">Handy while some of your team still watches the old group chat. Suppliers not on Nifti always get this.</div></div><div class="switch" id="quickShareToggle" onclick="toggleQuickSharePrompt()"><div class="knob"></div></div></div>
         </div>
 
         <h3 class="settings-section-title">Privacy &amp; data</h3>
@@ -3143,14 +3164,25 @@
         <div class="settings-card">
           <h2>Privacy &amp; discoverability</h2>
           <div class="sub">Controls who can find you and what they can see.</div>
-          <div class="toggle-row"><div><div class="toggle-txt">Allow new suppliers to find me in Discover</div><div class="toggle-sub">Off by default. Shows only your business profile — never pricing or orders.</div></div><div class="switch buyerPublicToggle" onclick="toggleMyBuyerProfilePublic()"><div class="knob"></div></div></div>
-          <div class="toggle-row"><div><div class="toggle-txt">Let my invited suppliers appear to other buyers</div><div class="toggle-sub">Protected by default — your suppliers stay hidden from competitors unless you turn this on.</div></div><div class="switch" onclick="this.classList.toggle('on')"><div class="knob"></div></div></div>
+          <div class="toggle-row"><div><div class="toggle-txt">Let other businesses find me in Discover</div><div class="toggle-sub">Off by default. Shows your name, the short profile you write and, for suppliers, your product list. Never your orders or who you work with.</div></div><div class="switch buyerPublicToggle" onclick="toggleMyBuyerProfilePublic()"><div class="knob"></div></div></div>
+          <div class="toggle-row"><div><div class="toggle-txt">🔒 Your suppliers and buyers stay private</div><div class="toggle-sub">Nobody else on Nifti can see who you work with, what you pay, or your orders. This is always on.</div></div></div>
+        </div>
+
+        <div class="settings-card">
+          <h2>👀 View-only access for your accountant</h2>
+          <div class="sub">Give your bookkeeper, accountant or business partner a link to see your orders and payments. They can't change anything and don't need an account. You can turn a link off anytime.</div>
+          <div id="shareLinksContent"></div>
         </div>
 
         <div class="settings-card">
           <h2>💾 Your data</h2>
-          <div class="sub">Download a full copy of your orders, inventory, payments and tasks any time. It's yours.</div>
-          <button class="btn btn-outline" onclick="exportAllData()">Download my data (.json) →</button>
+          <div class="sub">Download your records any time. The spreadsheets open in Excel or Google Sheets. It's your data.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-outline" onclick="exportOrdersToCsv(currentAppRole)">Orders (.csv)</button>
+            <button class="btn btn-outline" onclick="exportInvoicesToCsv(currentAppRole)">Invoices (.csv)</button>
+            <button class="btn btn-outline" onclick="exportPaymentsToCsv()">Payments (.csv)</button>
+            <button class="btn btn-outline" onclick="exportAllData()">Full backup (.json)</button>
+          </div>
         </div>
 
         <div class="settings-card">
@@ -3211,27 +3243,14 @@
         </div>
 
         <div class="settings-card danger-zone">
-          <h2>Danger zone</h2>
-          <div class="sub">Pauses new orders. Your history stays safe.</div>
-          <button class="btn-danger" id="deactivateBtn" onclick="deactivateAccount()">Deactivate account</button>
+          <h2>Pause your business</h2>
+          <div id="pauseAccountContent"></div>
         </div>
       </div>
 
       <div id="page-status" class="app-page">
         <div class="page-head"><h1 data-i18n="head_status">System Status</h1><p>Is everything working right now?</p></div>
-        <div class="settings-card">
-          <h2 style="color:var(--green);">✓ All systems operational</h2>
-          <div class="sub">Messaging, orders, and deliveries are all working.</div>
-        </div>
-        <div class="settings-card">
-          <h2>Fallback ordering channel</h2>
-          <div class="sub">If the app is down, SMS/Viber still works as backup.</div>
-        </div>
-        <div class="settings-card">
-          <h2>Scheduled maintenance</h2>
-          <div class="sub">We'll post any planned downtime here first.</div>
-          <div style="font-size:15px;color:var(--ink);">No maintenance currently scheduled.</div>
-        </div>
+        <div id="statusLiveContent"></div>
       </div>
 
     </div>
@@ -4619,28 +4638,6 @@ function addPartner(){
   document.getElementById('newPartnerScope').value = '';
   document.getElementById('addPartnerForm').classList.add('hidden');
 }
-function deactivateAccount(){
-  if(!requirePermission('manageAccount')) return;
-  // For a real account this used to just disable the button and say "Account deactivated" with
-  // zero actual effect — no sign-out, no change to businesses/team_members, nothing. The account
-  // stayed fully live (still authenticated, still reachable for new orders/messages) while telling
-  // the Owner it had been shut down. Real deactivation (blocking sign-in for the whole team,
-  // hiding the business from counterparties, an actual reactivation path matching "you can
-  // reactivate anytime") is real account-lifecycle work this app doesn't have the schema/flow for
-  // yet — showing an honest "not available yet" beats a false confirmation on something this
-  // consequential and hard to reverse if it silently did the wrong thing.
-  if(myBusiness){
-    showToast("Account deactivation isn't available yet — contact support if you need your account deactivated.", 'error');
-    return;
-  }
-  if(confirm('Deactivate your account? You can reactivate anytime.')){
-    const btn = document.getElementById('deactivateBtn');
-    btn.textContent = 'Account deactivated';
-    btn.disabled = true;
-    btn.style.opacity = '0.6';
-    btn.style.cursor = 'default';
-  }
-}
 
 /* ============ NOTIFICATIONS DROPDOWN ============ */
 let notificationsData = [
@@ -5007,7 +5004,7 @@ function toggleSupplierDashboardMore(){
   const el = document.getElementById('supplierDashboardMore');
   const label = document.getElementById('supplierDashMoreLabel');
   if(el) el.classList.toggle('hidden', !supplierDashMoreExpanded);
-  if(label) label.textContent = supplierDashMoreExpanded ? 'Show less ▲' : 'Show more — shipments due, top buyers, referrals ▼';
+  if(label) label.textContent = supplierDashMoreExpanded ? 'Show less ▲' : 'Show more — shipments due, top buyers ▼';
 }
 function renderSupplierDashboard(){
   document.getElementById('supplierDashboardView').innerHTML = `
@@ -5058,7 +5055,7 @@ function renderSupplierDashboard(){
     </div>
 
     <div style="text-align:center;margin:18px 0 4px;">
-      <span class="row-action" id="supplierDashMoreLabel" onclick="toggleSupplierDashboardMore()">Show more — shipments due, top buyers, referrals ▼</span>
+      <span class="row-action" id="supplierDashMoreLabel" onclick="toggleSupplierDashboardMore()">Show more — shipments due, top buyers ▼</span>
     </div>
     <div id="supplierDashboardMore" class="hidden">
       <!-- Section 7 #8 — referral/growth loop: a supplier who joined via a buyer's invite gets
@@ -5067,7 +5064,7 @@ function renderSupplierDashboard(){
       <div style="background:var(--green-soft);border:1.5px solid var(--green);border-radius:14px;padding:18px 20px;margin:16px 0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
         <div>
           <div style="font-weight:800;font-size:16px;color:var(--green-hover);">Bring your own customers onto Nifti too</div>
-          <div style="font-size:15px;color:var(--ink);margin-top:2px;">Same free, no-friction invite you got — no listing fees, no exposure to competitors, ever. <span class="row-action" onclick="navigate('settings')">Track your referral rewards →</span></div>
+          <div style="font-size:15px;color:var(--ink);margin-top:2px;">Send them your prices and take their orders here instead of Viber. They can order from a link without signing up.</div>
         </div>
         <button class="btn btn-primary" onclick="navigate('invite')">Invite your own customers →</button>
       </div>
@@ -5654,6 +5651,7 @@ function renderPublicOrderView(d, opts){
       <p style="opacity:.8;">It may have expired or been replaced. Ask the buyer to send the order again.</p></div></div>`;
     return;
   }
+  if(d.kind === 'delivery') return renderDeliveryLinkView(d);
   const [statusLabel, statusTone] = PUBLIC_STATUS[d.status] || [d.status, 'ok'];
   const totals = publicOrderTotal(d);
   const savedName = (() => { try{ return localStorage.getItem('nifti-public-name') || ''; }catch(e){ return ''; } })();
@@ -5714,7 +5712,7 @@ async function publicOrderRespond(action){
   const setErr = t => { if(errEl){ errEl.textContent = t; } else showToast(t); };
   const nameEl = document.getElementById('poPubName');
   const name = nameEl ? nameEl.value.trim() : '';
-  const note = action === 'note' ? (document.getElementById('poPubMsg')||{}).value : (document.getElementById('poPubNote')||{}).value;
+  const note = action === 'note' ? (document.getElementById('poPubMsg')||{}).value : action === 'picked_up' ? null : (document.getElementById('poPubNote')||{}).value;
   const eta = (document.getElementById('poPubEta')||{}).value || null;
   if(name.length < 2){ setErr('Please enter your name first.'); if(nameEl) nameEl.focus(); return; }
   if(action === 'decline' && !(note||'').trim()){ setErr('Please add a short reason in the note box, so the buyer knows what to do.'); document.getElementById('poPubNote').focus(); return; }
@@ -5727,7 +5725,7 @@ async function publicOrderRespond(action){
     setErr(error.message || 'Something went wrong. Please try again.');
     return;
   }
-  const msg = {confirm:'Confirmed. The buyer has been told.', decline:'Sent. The buyer knows you can\'t do this order.', shipped:'Marked as on the way.', note:'Message sent.'}[action];
+  const msg = {confirm:'Confirmed. The buyer has been told.', decline:'Sent. The buyer knows you can\'t do this order.', shipped:'Marked as on the way.', note:'Message sent.', picked_up:'Marked as picked up. They\'ve been told.', delivered:'Marked as delivered. Thank you!'}[action];
   showToast(msg, 'success');
   await loadPublicOrder(publicOrderToken);
 }
@@ -5746,6 +5744,8 @@ async function handleIncomingLink(){
   const hash = location.hash || '';
   const order = hash.match(/^#o\/([A-Za-z0-9_-]{20,64})$/);
   if(order){ await loadPublicOrder(order[1]); return true; }
+  const guest = hash.match(/^#g\/([A-Za-z0-9_-]{20,64})$/);
+  if(guest){ await loadGuestView(guest[1]); return true; }
   const join = hash.match(/^#join\/([A-Za-z0-9_-]{8,64})$/);
   if(join){
     try{ sessionStorage.setItem('nifti-claim-code', join[1]); }catch(e){}
@@ -6097,6 +6097,796 @@ async function createOrderFromPaste(){
   openOrderDetailModal(po.id, false);
 }
 
+/* ============ NOTIFICATIONS (real) ============
+   What reaches a phone is decided on the server now: database triggers queue a notification
+   whenever something real happens (a message, an order status change, a payment sent or
+   confirmed, a task assigned, a connection request) and push-dispatch delivers it to every
+   device of the business that should hear about it, even with Nifti fully closed. Settings here
+   control THIS device's subscription and the business's categories (notification_settings, read
+   by the dispatcher). Viber/SMS delivery isn't offered: both cost money per message. */
+let pushPublicKey = null;
+async function getPushPublicKey(){
+  if(pushPublicKey) return pushPublicKey;
+  try{ const { data } = await sb.rpc('get_push_public_key'); if(data) pushPublicKey = data; }catch(e){}
+  return pushPublicKey;
+}
+function keysMatch(sub, keyB64){
+  try{
+    const a = new Uint8Array(sub.options && sub.options.applicationServerKey || []);
+    const b = urlBase64ToUint8Array(keyB64);
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+  }catch(e){ return false; }
+}
+// Registers this device for background push. quiet=true is the automatic refresh on app open.
+async function subscribeToRealPush(quiet){
+  if(!myBusiness){ if(!quiet) showToast('Sign in to get notifications on this phone.'); return false; }
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)){ if(!quiet) showToast("This browser can't receive notifications when Nifti is closed. On iPhone, add Nifti to your Home Screen first (Share → Add to Home Screen).", 'error'); return false; }
+  try{
+    const key = await getPushPublicKey();
+    if(!key){ if(!quiet) showToast("Notifications aren't ready yet. Try again in a minute.", 'error'); return false; }
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if(subscription && !keysMatch(subscription, key)){ await subscription.unsubscribe(); subscription = null; }
+    if(!subscription){
+      subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) });
+    }
+    const { data, error } = await sb.functions.invoke('push-subscribe', { body: { subscription: subscription.toJSON() } });
+    const ok = !error && data && data.ok;
+    if(!quiet) showToast(ok ? "Notifications are on for this phone, even when Nifti is closed." : "Couldn't turn on notifications. Try again.", ok ? 'success' : 'error');
+    return ok;
+  }catch(err){
+    if(!quiet) showToast("Couldn't turn on notifications: " + err.message, 'error');
+    return false;
+  }
+}
+async function turnOnPhoneNotifications(){
+  if(!('Notification' in window)){ showToast("This browser doesn't support notifications.", 'error'); return; }
+  const perm = await requestNotificationPermissionSafe();
+  if(perm !== 'granted'){ showToast('Notifications are blocked. Allow them for this site in your browser settings, then try again.', 'error'); renderNotificationSettingsPanel(); return; }
+  chatNotificationsEnabled = true;
+  await subscribeToRealPush(false);
+  renderNotificationSettingsPanel();
+}
+async function turnOffPhoneNotifications(){
+  try{
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if(subscription){
+      if(myBusiness) await sb.functions.invoke('push-subscribe', { body: { subscription: subscription.toJSON(), unsubscribe: true } });
+      await subscription.unsubscribe();
+    }
+    showToast('Notifications are off for this phone.', 'success');
+  }catch(e){ showToast("Couldn't turn them off: " + e.message, 'error'); }
+  renderNotificationSettingsPanel();
+}
+async function sendTestNotification(){
+  if(!myBusiness){ showToast('Sign in to test notifications.'); return; }
+  const { error } = await sb.rpc('send_test_notification');
+  showToast(error ? ("Couldn't send the test: " + error.message) : 'Test sent. It should pop up on this phone in a few seconds.', error ? 'error' : 'success');
+  setTimeout(renderPushLogPanel, 4000);
+}
+// Business-wide category switches, stored where the server's dispatcher reads them.
+const NOTIF_CATEGORIES = [
+  {key:'order_updates', local:'orderUpdates', label:'Orders and payments', example:'✅ Metro Steel Co. confirmed PO-2026-0842'},
+  {key:'new_messages', local:'newMessages', label:'Messages', example:'Metro Steel Co.: "Truck leaves at 7am"'},
+  {key:'lead_alerts', local:'leadAlerts', label:'Connection requests', example:'Bayview Construction wants to connect'},
+];
+let serverNotifPrefs = null;
+let emailNotifAvailable = false;
+async function loadServerNotifPrefs(){
+  if(!myBusiness) return;
+  const [{ data }, avail] = await Promise.all([
+    sb.from('notification_settings').select('*').eq('business_id', myBusiness.id).maybeSingle(),
+    sb.rpc('email_notifications_available').then(r => r.data === true, () => false),
+  ]);
+  serverNotifPrefs = data || {business_id: myBusiness.id};
+  emailNotifAvailable = avail;
+}
+async function saveServerNotifPref(patch){
+  if(!myBusiness) return true;
+  const { error } = await sb.from('notification_settings').upsert(Object.assign({business_id: myBusiness.id}, patch), {onConflict: 'business_id'});
+  if(error){ showToast("Couldn't save that setting: " + error.message, 'error'); return false; }
+  Object.assign(serverNotifPrefs || (serverNotifPrefs = {}), patch);
+  return true;
+}
+async function toggleNotificationCategory(key){
+  const cat = NOTIF_CATEGORIES.find(c => c.key === key);
+  if(!cat) return;
+  const current = myBusiness ? (serverNotifPrefs && serverNotifPrefs[key] === false ? false : true) : notificationSettings[cat.local] !== false;
+  if(myBusiness){ if(!(await saveServerNotifPref({[key]: !current}))) return; }
+  notificationSettings[cat.local] = !current;
+  scheduleNiftiSave();
+  renderNotificationSettingsPanel();
+}
+async function saveEmailNotifSettings(){
+  const on = document.getElementById('notifEmailOn').checked;
+  const addr = document.getElementById('notifEmailAddr').value.trim();
+  if(on && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)){ markFieldInvalid('notifEmailAddr', 'Enter the email address to send notifications to.'); return; }
+  if(await saveServerNotifPref({channel_email: on, email_address: addr || null})) showToast(on ? 'Email notifications on.' : 'Email notifications off.', 'success');
+}
+async function renderNotificationSettingsPanel(){
+  const el = document.getElementById('notifSettingsContent');
+  if(!el) return;
+  if(myBusiness && !serverNotifPrefs) await loadServerNotifPrefs();
+  let phoneState = 'unsupported';
+  if('Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window){
+    phoneState = Notification.permission === 'denied' ? 'blocked' : 'off';
+    if(Notification.permission === 'granted'){
+      try{ const reg = await navigator.serviceWorker.getRegistration(); const sub = reg && await reg.pushManager.getSubscription(); if(sub) phoneState = 'on'; }catch(e){}
+    }
+  }
+  const isOn = key => { const c = NOTIF_CATEGORIES.find(x => x.key === key); return myBusiness ? !(serverNotifPrefs && serverNotifPrefs[key] === false) : notificationSettings[c.local] !== false; };
+  const phoneBlock = {
+    on: `<div class="notif-phone on">✓ On for this phone. You'll get notified even when Nifti is closed.</div>
+         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;"><button class="btn btn-outline" style="padding:8px 14px;font-size:14px;" onclick="sendTestNotification()">Send me a test</button><button class="btn btn-outline" style="padding:8px 14px;font-size:14px;" onclick="turnOffPhoneNotifications()">Turn off on this phone</button></div>`,
+    off: `<div class="notif-phone">Get a buzz on this phone when a supplier or buyer messages you, an order changes, or a payment comes in, like Viber.</div>
+          <button class="btn btn-primary" style="margin-top:8px;" onclick="turnOnPhoneNotifications()">🔔 Turn on notifications</button>`,
+    blocked: `<div class="notif-phone warn">Notifications are blocked for this site. Open your browser's site settings, allow notifications for Nifti, then come back here.</div>`,
+    unsupported: `<div class="notif-phone warn">This browser can't show notifications when Nifti is closed. On iPhone, open Nifti in Safari, tap Share → Add to Home Screen, then open it from your Home Screen.</div>`,
+  }[phoneState];
+  const email = myBusiness && emailNotifAvailable ? `<div style="margin-top:16px;">
+      <label style="display:flex;gap:8px;align-items:center;font-weight:700;"><input type="checkbox" id="notifEmailOn" ${serverNotifPrefs && serverNotifPrefs.channel_email ? 'checked' : ''}> Also email me</label>
+      <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;"><input type="email" id="notifEmailAddr" value="${escapeHtml((serverNotifPrefs && serverNotifPrefs.email_address) || '')}" placeholder="you@business.ph" style="flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">
+      <button class="btn btn-outline" style="padding:8px 14px;font-size:14px;" onclick="saveEmailNotifSettings()">Save</button></div>
+    </div>` : '';
+  el.innerHTML = `
+    <div style="font-weight:800;font-size:15px;margin-bottom:4px;">On this phone</div>
+    ${phoneBlock}
+    ${email}
+    <div style="font-weight:800;font-size:15px;margin:18px 0 4px;">Notify ${myBusiness ? 'your business' : 'me'} about</div>
+    ${NOTIF_CATEGORIES.map(c => `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:14px;">
+        <div style="flex:1;"><div style="font-weight:700;font-size:15px;">${c.label}</div><div style="font-size:13px;opacity:.6;margin-top:2px;">e.g. ${escapeHtml(c.example)}</div></div>
+        <div class="switch ${isOn(c.key) ? 'on' : ''}" onclick="toggleNotificationCategory('${c.key}')"><div class="knob"></div></div>
+      </div>`).join('')}
+    <div style="font-size:13px;opacity:.65;margin-top:8px;">Team tasks and team chat always notify the teammate involved.</div>`;
+  renderPushLogPanel();
+}
+function simulateExternalPush(){ /* notifications to phones are sent by the server (notification_outbox) */ }
+function updatePushLogBadge(){}
+// The real list of notifications the server sent this business.
+async function renderPushLogPanel(){
+  const el = document.getElementById('pushLogContent');
+  if(!el) return;
+  if(!myBusiness){ el.innerHTML = '<div style="font-size:14px;opacity:.7;">Sign in to see notifications sent to your business.</div>'; return; }
+  const { data, error } = await sb.from('notification_outbox').select('title, body, created_at, sent_at, error').eq('business_id', myBusiness.id).order('id', {ascending:false}).limit(15);
+  if(error){ el.innerHTML = ''; return; }
+  el.innerHTML = (data && data.length) ? data.map(n => `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
+      <div style="font-weight:700;font-size:14.5px;">${escapeHtml(n.title)}</div>
+      ${n.body ? `<div style="font-size:13.5px;opacity:.8;">${escapeHtml(n.body)}</div>` : ''}
+      <div style="font-size:12px;opacity:.55;margin-top:2px;">${new Date(n.created_at).toLocaleString('en-PH',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} · ${n.sent_at ? (n.error ? 'sent, with a problem on one device' : 'sent') : 'sending…'}</div>
+    </div>`).join('') : '<div style="font-size:14px;opacity:.7;">Nothing yet. Notifications appear here as they go out.</div>';
+}
+
+/* ============ DISCOVER (real, for signed-in accounts) ============
+   Lists only businesses that switched on "let others find you" (businesses.catalog_public),
+   with the public profile and (for suppliers) the catalog they chose to show — never who they
+   work with, their orders, or product photos. Requests go through request_connection /
+   respond_connection; accepting connects both businesses and opens a chat. Demo mode keeps
+   its sample businesses. */
+const realDiscover = {suppliers: null, buyers: null};
+let realIncomingRequests = null;
+function discoverProfiles(mode){
+  if(!myBusiness) return mode === 'suppliers' ? supplierProfiles : buyerProfiles;
+  return realDiscover[mode] || [];
+}
+async function loadRealDiscover(mode){
+  const { data, error } = await sb.rpc('discover_businesses', {p_type: mode === 'suppliers' ? 'supplier' : 'buyer'});
+  if(error){ showToast("Couldn't load Discover: " + error.message, 'error'); realDiscover[mode] = []; return; }
+  realDiscover[mode] = (data || []).map(r => {
+    const prof = r.profile || {};
+    return {id: r.id, n: r.name, cat: prof.category || 'Other', badge: prof.category || 'Business',
+      desc: [prof.location, prof.description].filter(Boolean).join(' · ') || 'On Nifti',
+      catalogPublic: (r.catalog || []).length > 0, catalog: r.catalog || [], connected: r.connected, requestStatus: r.request_status || null};
+  });
+}
+function renderDiscAction(p, idx, mode){
+  if(myBusiness){
+    if(p.connected) return `<div id="discAction_${idx}" style="margin-top:10px;display:flex;gap:10px;align-items:center;"><span style="font-weight:700;color:var(--green);">✓ Connected</span><button class="btn btn-outline" style="padding:6px 12px;font-size:14px;" onclick="navigate('messages'); selectConversation('${p.id}')">Message</button></div>`;
+    if(p.requestStatus === 'pending') return `<div id="discAction_${idx}" style="margin-top:10px;font-weight:700;color:var(--green);">Request sent ✓ <span style="font-weight:400;opacity:.7;">Waiting for them to accept</span></div>`;
+    if(p.requestStatus === 'declined') return `<div id="discAction_${idx}" style="margin-top:10px;font-size:14px;opacity:.7;">They declined your request.</div>`;
+  }
+  return `<div id="discAction_${idx}"><button class="btn-connect" style="margin-top:10px;" onclick="sendDiscoveryRequest(${idx}, '${mode}')">Send connection request</button></div>`;
+}
+async function sendRealConnectionRequest(idx, mode){
+  const p = window._discListRef[idx];
+  if(!p) return;
+  const { error } = await sb.rpc('request_connection', {p_to: p.id, p_note: null});
+  if(error){ showToast("Couldn't send the request: " + error.message, 'error'); return; }
+  p.requestStatus = 'pending';
+  const el = document.getElementById('discAction_' + idx);
+  if(el) el.outerHTML = renderDiscAction(p, idx, mode);
+  trackEvent('discovery_request_sent', {category: p.cat, mode});
+  showToast(`Request sent to ${p.n}. You'll get a notification when they accept.`, 'success');
+}
+async function loadRealIncomingRequests(){
+  const { data, error } = await sb.rpc('incoming_connection_requests');
+  realIncomingRequests = error ? [] : (data || []);
+}
+async function renderRealRequestsPanel(){
+  const el = document.getElementById('discoveryLeadsContent');
+  if(!el) return;
+  if(realIncomingRequests === null){ el.innerHTML = '<div style="opacity:.7;">Loading requests…</div>'; await loadRealIncomingRequests(); }
+  const isPublic = !!myBusiness.catalog_public;
+  const pending = realIncomingRequests.filter(r => r.status === 'pending');
+  el.innerHTML = `
+    <div style="font-weight:800;font-size:16px;margin-bottom:4px;">Requests to connect ${pending.length ? `<span style="color:var(--green);">(${pending.length} new)</span>` : ''}</div>
+    <div style="font-size:14px;opacity:.7;margin-bottom:12px;">${isPublic ? 'Businesses that found you here and want to work with you.' : 'Turn on the switch above so new businesses can find you and ask to connect.'}</div>
+    ${realIncomingRequests.slice(0, 20).map(r => `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:12px;flex-wrap:wrap;">
+      <div><div style="font-weight:700;font-size:15px;">${escapeHtml(r.from_name)}</div>
+        <div style="font-size:13px;opacity:.7;">${escapeHtml([r.profile && r.profile.category, r.profile && r.profile.location].filter(Boolean).join(' · ') || (r.from_type === 'buyer' ? 'Buyer' : 'Supplier'))} · ${new Date(r.created_at).toLocaleDateString('en-PH',{month:'short',day:'numeric'})}</div>
+        ${r.note ? `<div style="font-size:14px;margin-top:3px;">"${escapeHtml(r.note)}"</div>` : ''}</div>
+      ${r.status === 'pending' ? `<div style="display:flex;gap:8px;"><button class="btn btn-primary" style="padding:7px 14px;font-size:14px;" onclick="acceptDiscoveryLead('${r.id}')">Accept</button><button class="btn btn-outline" style="padding:7px 14px;font-size:14px;" onclick="declineDiscoveryLead('${r.id}')">Decline</button></div>`
+        : r.status === 'accepted' ? `<span style="font-weight:700;color:var(--green);">✓ Connected</span>` : `<span style="opacity:.7;">Declined</span>`}
+    </div>`).join('')}`;
+}
+async function respondRealConnection(id, accept){
+  const { error } = await sb.rpc('respond_connection', {p_request: id, p_accept: accept});
+  if(error){ showToast("Couldn't respond: " + error.message, 'error'); return; }
+  const r = (realIncomingRequests || []).find(x => x.id === id);
+  if(r) r.status = accept ? 'accepted' : 'declined';
+  renderRealRequestsPanel();
+  if(accept){
+    await loadMyConnections();
+    await loadMyConversations();
+    if(document.getElementById('suppliersGrid')) renderSuppliersTable();
+    showToast(`${r ? r.from_name : 'They'} ${r && r.from_type === 'buyer' ? 'is now one of your buyers' : 'is now one of your suppliers'}. You can message and order from each other.`, 'success');
+  }
+}
+async function toggleRealPublic(){
+  if(!isPrivilegedUser()){ showToast('Only an Owner or General Manager can change this.', 'error'); return; }
+  const next = !myBusiness.catalog_public;
+  const { error } = await sb.from('businesses').update({catalog_public: next}).eq('id', myBusiness.id);
+  if(error){ showToast("Couldn't change that: " + error.message, 'error'); return; }
+  myBusiness.catalog_public = next;
+  myCatalogPublic = next; myBuyerProfilePublic = next;
+  const t = document.getElementById('discPublicToggle'); if(t) t.classList.toggle('on', next);
+  if(next && myBusiness.type === 'supplier') await syncCatalogToServer();
+  renderPublicProfileForm();
+  renderRealRequestsPanel();
+  showToast(next ? 'You can now be found in Discover.' : "You're hidden from Discover.", 'success');
+}
+function renderPublicProfileForm(){
+  const el = document.getElementById('discProfileForm');
+  if(!el) return;
+  if(!myBusiness || !myBusiness.catalog_public){ el.innerHTML = ''; return; }
+  const p = myBusiness.public_profile || {};
+  el.innerHTML = `<div class="panel-card" style="margin-bottom:20px;">
+    <div style="font-weight:800;font-size:15px;margin-bottom:2px;">What others see about you</div>
+    <div style="font-size:13.5px;opacity:.7;margin-bottom:10px;">Only this, your business name${myBusiness.type === 'supplier' ? ' and your product list with prices' : ''}. Never who you work with or your orders.</div>
+    <div class="row-2">
+      <div class="field"><label>What you ${myBusiness.type === 'supplier' ? 'sell' : 'buy'}</label><input id="pubCategory" maxlength="60" value="${escapeHtml(p.category||'')}" placeholder="e.g. Steel &amp; rebar"></div>
+      <div class="field"><label>Where you are</label><input id="pubLocation" maxlength="60" value="${escapeHtml(p.location||'')}" placeholder="e.g. Valenzuela City"></div>
+    </div>
+    <div class="field"><label>One line about you</label><input id="pubDescription" maxlength="200" value="${escapeHtml(p.description||'')}" placeholder="e.g. Same-day delivery within Metro Manila"></div>
+    <button class="btn btn-primary" style="padding:8px 16px;" onclick="savePublicProfile()">Save</button>
+  </div>`;
+}
+async function savePublicProfile(){
+  const profile = {category: stripMarkup(document.getElementById('pubCategory').value).slice(0,60), location: stripMarkup(document.getElementById('pubLocation').value).slice(0,60), description: stripMarkup(document.getElementById('pubDescription').value).slice(0,200)};
+  const { error } = await sb.from('businesses').update({public_profile: profile}).eq('id', myBusiness.id);
+  if(error){ showToast("Couldn't save: " + error.message, 'error'); return; }
+  myBusiness.public_profile = profile;
+  showToast('Saved. This is what businesses see in Discover.', 'success');
+}
+// A supplier's catalog now lives on the server (same on every device; the public part is what
+// Discover shows). Photos stay on the device for now to keep the stored catalog small.
+let catalogSyncTimer = null;
+function scheduleCatalogServerSync(){
+  if(!myBusiness || myBusiness.type !== 'supplier') return;
+  clearTimeout(catalogSyncTimer);
+  catalogSyncTimer = setTimeout(syncCatalogToServer, 1200);
+}
+async function syncCatalogToServer(){
+  if(!myBusiness || myBusiness.type !== 'supplier') return;
+  const clean = myCatalog.slice(0, 500).map(c => ({product: String(c.product||'').slice(0,200), price: Number(c.price)||0, unit: String(c.unit||'').slice(0,30), moq: Number(c.moq)||1, updatedAt: c.updatedAt || APP_TODAY}));
+  const { error } = await sb.from('businesses').update({catalog: clean}).eq('id', myBusiness.id);
+  if(!error) myBusiness.catalog = clean;
+}
+function applyServerCatalog(){
+  if(!myBusiness) return;
+  myCatalogPublic = !!myBusiness.catalog_public;
+  myBuyerProfilePublic = !!myBusiness.catalog_public;
+  if(myBusiness.type !== 'supplier' || !Array.isArray(myBusiness.catalog) || !myBusiness.catalog.length) return;
+  const photos = new Map(myCatalog.filter(c => c.photo).map(c => [String(c.product).toLowerCase(), c.photo]));
+  myCatalog = myBusiness.catalog.map(c => Object.assign({}, c, photos.has(String(c.product).toLowerCase()) ? {photo: photos.get(String(c.product).toLowerCase())} : {}));
+}
+
+/* ============ REAL VERSIONS OF THE LAST "PRETEND" FEATURES ============
+   Pause new orders, delivery-partner links, read-only share links (accountant/guest),
+   your contact for partners, CSV exports, quick-send after ordering, bulk invite from
+   contacts, voice typing, the live status page and Google sign-in (behind a switch).
+   All free: nothing here calls a paid service. */
+
+// ---- Pause new orders (was "Deactivate account", which did nothing) ----
+function renderPauseCard(){
+  const el = document.getElementById('pauseAccountContent');
+  if(!el) return;
+  const paused = myBusiness ? !!myBusiness.paused_at : !!window._demoPaused;
+  el.innerHTML = paused
+    ? `<div class="logi-note" style="margin-bottom:10px;">⏸ New orders are paused${myBusiness && myBusiness.paused_at ? ' since ' + new Date(myBusiness.paused_at).toLocaleDateString('en-PH',{month:'short',day:'numeric'}) : ''}. Partners who try to order see that you've paused. Orders already open, messages and payments keep working. You're hidden from Discover.</div>
+       <button class="btn btn-primary" onclick="setBusinessPaused(false)">Resume taking orders</button>`
+    : `<div class="sub">Going on leave, closing for the holidays, or stopping for now? Pausing blocks new orders to and from your business. Everything you have stays, open orders can still be finished, and you can resume anytime.</div>
+       <button class="btn-danger" id="deactivateBtn" onclick="deactivateAccount()">Pause new orders</button>`;
+}
+function deactivateAccount(){
+  if(!requirePermission('manageAccount')) return;
+  if(!confirm('Pause new orders? Partners won\'t be able to send you orders until you resume. Open orders, messages and payments keep working.')) return;
+  setBusinessPaused(true);
+}
+async function setBusinessPaused(paused){
+  if(!requirePermission('manageAccount')) return;
+  if(myBusiness){
+    const { error } = await sb.rpc('set_business_paused', {p_paused: paused});
+    if(error){ showToast("Couldn't change that: " + error.message, 'error'); return; }
+    myBusiness.paused_at = paused ? new Date().toISOString() : null;
+    if(paused){ myBusiness.catalog_public = false; myCatalogPublic = false; myBuyerProfilePublic = false; }
+  } else {
+    window._demoPaused = paused;
+  }
+  renderPauseCard();
+  renderPausedBanner();
+  showToast(paused ? 'New orders are paused.' : "You're taking orders again.", 'success');
+}
+function renderPausedBanner(){
+  let b = document.getElementById('pausedBanner');
+  const paused = myBusiness ? !!myBusiness.paused_at : !!window._demoPaused;
+  if(!paused){ if(b) b.remove(); return; }
+  if(b) return;
+  const main = document.querySelector('.main');
+  if(!main) return;
+  b = document.createElement('div');
+  b.id = 'pausedBanner';
+  b.className = 'logi-note';
+  b.style.cssText = 'margin:0 0 14px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;';
+  b.innerHTML = `<span>⏸ New orders are paused for your business.</span><span class="row-action" onclick="setBusinessPaused(false)">Resume →</span>`;
+  main.prepend(b);
+}
+
+// ---- Your contact for partners (shown on order and delivery links) ----
+function partnerContact(){ return (myBusiness && myBusiness.shared_contact) || window._demoSharedContact || {}; }
+function renderSharedContactCard(){
+  const el = document.getElementById('sharedContactContent');
+  if(!el) return;
+  const c = partnerContact();
+  el.innerHTML = `<div class="row-2">
+      <div class="field"><label>Contact person</label><input id="scName" maxlength="80" value="${escapeHtml(c.name||'')}" placeholder="e.g. Aling Rosa (receiving)"></div>
+      <div class="field"><label>Mobile / Viber</label><input id="scPhone" maxlength="30" value="${escapeHtml(c.phone||'')}" placeholder="0917 123 4567"></div>
+    </div>
+    <div class="field"><label>Delivery or pickup instructions</label><input id="scNote" maxlength="200" value="${escapeHtml(c.note||'')}" placeholder="e.g. Receiving 8am–4pm, use the side gate on Rizal St."></div>
+    <button class="btn-primary-sm" onclick="savePartnerContact()">Save</button>`;
+}
+async function savePartnerContact(){
+  if(!requirePermission('manageAccount')) return;
+  const c = {name: stripMarkup(document.getElementById('scName').value).slice(0,80), phone: stripMarkup(document.getElementById('scPhone').value).slice(0,30), note: stripMarkup(document.getElementById('scNote').value).slice(0,200)};
+  Object.keys(c).forEach(k => { if(!c[k]) delete c[k]; });
+  if(myBusiness){
+    const { error } = await sb.from('businesses').update({shared_contact: c}).eq('id', myBusiness.id);
+    if(error){ showToast("Couldn't save: " + error.message, 'error'); return; }
+    myBusiness.shared_contact = c;
+  } else window._demoSharedContact = c;
+  showToast('Saved. Suppliers and delivery drivers see this on your order links.', 'success');
+}
+
+// ---- Delivery partners: a saved list + a link per order (no prices shown) ----
+function logisticsPartners(){ return (myBusiness ? myBusiness.logistics_partners : window._demoPartners) || []; }
+async function saveLogisticsPartners(list){
+  if(myBusiness){
+    const { error } = await sb.from('businesses').update({logistics_partners: list}).eq('id', myBusiness.id);
+    if(error){ showToast("Couldn't save: " + error.message, 'error'); return false; }
+    myBusiness.logistics_partners = list;
+  } else window._demoPartners = list;
+  return true;
+}
+function renderLogisticsPartnersCard(){
+  const el = document.getElementById('logisticsPartnersContent');
+  if(!el) return;
+  const list = logisticsPartners();
+  el.innerHTML = `${list.length ? list.map((p, i) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:10px;">
+      <div><div style="font-weight:700;">${escapeHtml(p.name)}</div><div style="font-size:13.5px;opacity:.7;">${escapeHtml(p.phone || 'No number saved')}</div></div>
+      <span class="row-action" style="color:var(--danger);" onclick="removeLogisticsPartner(${i})">Remove</span></div>`).join('')
+    : '<div style="font-size:14.5px;opacity:.7;margin-bottom:6px;">No delivery partners saved yet.</div>'}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+      <input id="lpName" maxlength="80" placeholder="e.g. Kuya Jun (Lalamove) or JRS Express" style="flex:2;min-width:180px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">
+      <input id="lpPhone" maxlength="30" placeholder="Mobile / Viber" style="flex:1;min-width:130px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">
+      <button class="btn btn-outline" style="padding:8px 14px;" onclick="addLogisticsPartner()">+ Add</button>
+    </div>`;
+}
+async function addLogisticsPartner(){
+  const name = stripMarkup(document.getElementById('lpName').value).trim().slice(0,80);
+  const phone = stripMarkup(document.getElementById('lpPhone').value).trim().slice(0,30);
+  if(name.length < 2){ markFieldInvalid('lpName', 'Enter their name.'); return; }
+  const list = logisticsPartners().slice();
+  if(list.length >= 30){ showToast('You can save up to 30 delivery partners.', 'error'); return; }
+  list.push(phone ? {name, phone} : {name});
+  if(await saveLogisticsPartners(list)){ renderLogisticsPartnersCard(); showToast(`${name} saved.`, 'success'); }
+}
+async function removeLogisticsPartner(i){
+  const list = logisticsPartners().slice();
+  list.splice(i, 1);
+  if(await saveLogisticsPartners(list)) renderLogisticsPartnersCard();
+}
+const DELIVERY_LINK_STATUSES = ['confirmed','preparing','shipped','in_customs'];
+function renderDeliveryPartnerBox(o){
+  if(!DELIVERY_LINK_STATUSES.includes(o.status)) return '';
+  const partners = logisticsPartners();
+  return `<div class="expand-actions" style="margin-top:10px;flex-direction:column;align-items:stretch;" onclick="event.stopPropagation()">
+    <details><summary style="cursor:pointer;font-weight:700;font-size:15px;">🚚 Send to a delivery partner</summary>
+      <div style="font-size:14px;opacity:.8;margin:6px 0 8px;">They get a link with the items, address and your contact (no prices). They tap "Picked up" and "Delivered", and you both get notified.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input id="dlPartner_${o.id}" list="dlPartnerList_${o.id}" maxlength="80" placeholder="Driver or courier name" style="flex:1;min-width:180px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">
+        <datalist id="dlPartnerList_${o.id}">${partners.map(p => `<option value="${escapeHtml(p.name)}"></option>`).join('')}</datalist>
+        <button class="btn btn-outline" style="padding:8px 14px;" onclick="createDeliveryLink('${o.id}')">Make link</button>
+      </div>
+      <div id="dlResult_${o.id}"></div>
+    </details></div>`;
+}
+async function createDeliveryLink(poId){
+  const o = getPO(poId);
+  const input = document.getElementById('dlPartner_' + poId);
+  const partner = stripMarkup(input ? input.value : '').trim();
+  if(partner.length < 2){ markFieldInvalid('dlPartner_' + poId, 'Who is delivering?'); return; }
+  let token = 'demo';
+  if(myBusiness){
+    const { data, error } = await sb.rpc('create_delivery_link', {p_po_id: poId, p_partner: partner});
+    if(error){ showToast("Couldn't make the link: " + error.message, 'error'); return; }
+    token = data;
+    if(!logisticsPartners().some(p => p.name.toLowerCase() === partner.toLowerCase()) && logisticsPartners().length < 30){
+      saveLogisticsPartners(logisticsPartners().concat([{name: partner}]));
+    }
+  }
+  const link = appBaseUrl() + '#o/' + token;
+  const addr = o && o.deliveryAddress ? `\nDeliver to: ${o.deliveryAddress}` : '';
+  const msg = `Hi ${partner}! Delivery for ${o ? o.poNumber : 'our order'}${o ? ` (${o.buyerName})` : ''}.${addr}\nItems and contact are here. Please tap "Picked up" when you leave and "Delivered" when done:\n${link}`;
+  const partnerRec = logisticsPartners().find(p => p.name.toLowerCase() === partner.toLowerCase());
+  document.getElementById('dlResult_' + poId).innerHTML = `<div class="share-box" style="margin-top:10px;">
+    ${partnerRec && partnerRec.phone ? `<div style="font-size:14px;margin-bottom:6px;">📱 ${escapeHtml(partnerRec.phone)}</div>` : ''}
+    ${shareButtonsHtml('delivery:' + poId + ':' + Date.now(), msg)}
+    ${myBusiness ? '' : `<div style="font-size:13px;opacity:.7;margin-top:6px;">Demo: the link only works for signed-in accounts.</div>`}</div>`;
+}
+
+// ---- Read-only share links: accountant / bookkeeper / guest ----
+let shareLinksCache = null;
+const SHARE_SCOPES = {invoices: 'Invoices & payments only', orders: 'Orders only', full: 'Orders, invoices & payments'};
+async function renderShareLinksCard(){
+  const el = document.getElementById('shareLinksContent');
+  if(!el) return;
+  if(myBusiness && shareLinksCache === null){
+    const { data } = await sb.from('business_share_links').select('*').order('created_at', {ascending:false}).limit(30);
+    shareLinksCache = data || [];
+  }
+  const links = (shareLinksCache || []).filter(l => !l.revoked_at && new Date(l.expires_at) > new Date());
+  el.innerHTML = `<div class="row-2">
+      <div class="field"><label>Who is it for?</label><input id="slLabel" maxlength="80" placeholder="e.g. Ma'am Liza (bookkeeper)"></div>
+      <div class="field"><label>What they can see</label><select id="slScope">${Object.entries(SHARE_SCOPES).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>Link works for</label><select id="slDays"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option><option value="90">90 days</option></select></div>
+    <button class="btn-primary-sm" onclick="createShareLink()">Create view-only link</button>
+    <div id="slResult"></div>
+    ${links.length ? `<div style="font-weight:800;font-size:15px;margin:16px 0 4px;">Active links</div>${links.map(l => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:10px;flex-wrap:wrap;">
+        <div><div style="font-weight:700;">${escapeHtml(l.label || 'View-only link')}</div>
+        <div style="font-size:13px;opacity:.7;">${SHARE_SCOPES[l.scope]} · until ${new Date(l.expires_at).toLocaleDateString('en-PH',{month:'short',day:'numeric'})} · ${l.view_count ? `opened ${l.view_count}×` : 'not opened yet'}</div></div>
+        <span class="row-action" style="color:var(--danger);" onclick="revokeShareLink('${escapeHtml(l.token)}')">Turn off</span></div>`).join('')}` : ''}`;
+}
+async function createShareLink(){
+  if(!requirePermission('manageAccount')) return;
+  const label = stripMarkup(document.getElementById('slLabel').value).trim();
+  const scope = document.getElementById('slScope').value;
+  const days = Number(document.getElementById('slDays').value);
+  let token = 'demo';
+  if(myBusiness){
+    const { data, error } = await sb.rpc('create_business_share_link', {p_scope: scope, p_days: days, p_label: label || null});
+    if(error){ showToast("Couldn't make the link: " + error.message, 'error'); return; }
+    token = data; shareLinksCache = null;
+  }
+  const link = appBaseUrl() + '#g/' + token;
+  const msg = `Hi${label ? ' ' + label : ''}! Here's a view-only link to our ${scope === 'invoices' ? 'invoices and payments' : scope === 'orders' ? 'orders' : 'orders, invoices and payments'} on Nifti. It works for ${days} day${days===1?'':'s'}, no sign-up needed:\n${link}`;
+  await renderShareLinksCard();
+  document.getElementById('slResult').innerHTML = `<div class="share-box" style="margin-top:10px;">${shareButtonsHtml('guest:' + Date.now(), msg)}</div>`;
+}
+async function revokeShareLink(token){
+  if(!confirm('Turn off this link? Anyone who has it won\'t be able to open it anymore.')) return;
+  if(myBusiness){
+    const { error } = await sb.rpc('revoke_business_share_link', {p_token: token});
+    if(error){ showToast("Couldn't turn it off: " + error.message, 'error'); return; }
+    shareLinksCache = null;
+  }
+  renderShareLinksCard();
+  showToast('Link turned off.', 'success');
+}
+// The page an accountant or guest sees (#g/<token>)
+async function loadGuestView(token){
+  let d = null;
+  try{ const { data, error } = await sb.rpc('get_business_share', {p_token: token}); if(!error) d = data; }catch(e){}
+  renderGuestView(d);
+}
+function renderGuestView(d){
+  let host = document.getElementById('publicOrderView');
+  if(!host){ host = document.createElement('div'); host.id = 'publicOrderView'; document.body.appendChild(host); }
+  document.body.classList.add('public-order-open');
+  if(!d){
+    host.innerHTML = `<div class="po-public"><div class="po-public-card" style="text-align:center;"><div style="font-size:40px;">🔗</div><h1 style="font-size:22px;margin:8px 0;">This link isn't working</h1><p style="opacity:.8;">It may have expired or been turned off. Ask for a new one.</p></div></div>`;
+    return;
+  }
+  document.title = `${d.business} · view only · Nifti`;
+  window._guestData = d;
+  const orders = d.orders || [];
+  const unpaid = orders.filter(o => o.invoice && Number(o.invoice.balance) > 0);
+  const owedToThem = unpaid.filter(o => o.side === 'sold').reduce((s,o) => s + Number(o.invoice.balance), 0);
+  const theyOwe = unpaid.filter(o => o.side === 'bought').reduce((s,o) => s + Number(o.invoice.balance), 0);
+  const rows = orders.map(o => `<tr>
+      <td>${escapeHtml(o.created_date)}</td><td>${escapeHtml(o.po_number)}${o.invoice && o.invoice.number ? `<div style="font-size:12.5px;opacity:.7;">${escapeHtml(o.invoice.number)}</div>` : ''}</td>
+      <td>${o.side === 'sold' ? 'Sold to' : 'Bought from'} ${escapeHtml(o.counterpart || '')}</td>
+      <td>${escapeHtml((PUBLIC_STATUS[o.status]||[o.status])[0])}</td>
+      <td style="text-align:right;">${fmtPHP(o.total)}</td>
+      <td style="text-align:right;">${o.invoice ? fmtPHP(o.invoice.balance) : ''}</td></tr>`).join('');
+  host.innerHTML = `<div class="po-public" style="max-width:980px;">
+    <div class="po-public-head"><span class="po-public-brand">Nifti</span><span style="opacity:.7;font-size:14px;">View only${d.label ? ' · for ' + escapeHtml(d.label) : ''}</span></div>
+    <div class="po-public-card">
+      <h1 style="font-size:24px;margin:0 0 4px;">${escapeHtml(d.business)}</h1>
+      <div style="opacity:.75;font-size:14.5px;">${SHARE_SCOPES[d.scope]} · last ${orders.length} orders · link works until ${new Date(d.expires_at).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'})}</div>
+      ${(d.scope !== 'orders') ? `<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;">
+        <div><div style="font-size:13px;opacity:.7;">Customers still owe</div><div style="font-size:20px;font-weight:800;">${fmtPHP(owedToThem)}</div></div>
+        <div><div style="font-size:13px;opacity:.7;">Still to pay suppliers</div><div style="font-size:20px;font-weight:800;">${fmtPHP(theyOwe)}</div></div></div>` : ''}
+      <button class="btn btn-outline" style="margin-top:12px;" onclick="downloadGuestCsv()">Download as spreadsheet (.csv)</button>
+    </div>
+    <div class="po-public-card"><div class="po-public-table-wrap"><table class="po-public-table">
+      <thead><tr><th>Date</th><th>Order</th><th>With</th><th>Status</th><th style="text-align:right;">Total</th><th style="text-align:right;">Unpaid</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="6" style="opacity:.7;">No orders yet.</td></tr>'}</tbody></table></div></div>
+    <div style="text-align:center;font-size:13px;opacity:.6;margin:10px 0 30px;">Shared from Nifti · read-only, nothing here can be changed</div>
+  </div>`;
+  window.scrollTo(0, 0);
+}
+function downloadGuestCsv(){
+  const d = window._guestData;
+  if(!d) return;
+  const rows = [['Date','Order #','Side','Counterpart','Status','Total (PHP)','Invoice #','Invoice due','Unpaid (PHP)','Payments']];
+  (d.orders||[]).forEach(o => rows.push([o.created_date, o.po_number, o.side, o.counterpart||'', o.status, o.total,
+    o.invoice ? o.invoice.number||'' : '', o.invoice ? o.invoice.due_date||'' : '', o.invoice ? o.invoice.balance : '',
+    o.invoice && o.invoice.payments ? o.invoice.payments.map(p => `${p.date} ${p.method} ${p.amount} (${p.status})${p.reference ? ' ref ' + p.reference : ''}`).join('; ') : '']));
+  downloadCsv(`${String(d.business).replace(/[^A-Za-z0-9]+/g,'-')}-${realTodayDateStr()}.csv`, rows);
+}
+
+// ---- Delivery partner's view of a #o/ link (no prices, pickup / delivered) ----
+function renderDeliveryLinkView(d){
+  const host = document.getElementById('publicOrderView');
+  const savedName = (() => { try{ return localStorage.getItem('nifti-public-name') || ''; }catch(e){ return ''; } })();
+  const [statusLabel, tone] = PUBLIC_STATUS[d.status] || [d.status, 'ok'];
+  const contact = c => c && (c.name || c.phone || c.note) ? `${c.name ? escapeHtml(c.name) : ''}${c.phone ? ` · <a href="tel:${escapeHtml(String(c.phone).replace(/[^0-9+]/g,''))}">${escapeHtml(c.phone)}</a>` : ''}${c.note ? `<div style="opacity:.8;">${escapeHtml(c.note)}</div>` : ''}` : '';
+  const done = /delivered|invoiced|paid/.test(d.status);
+  const closed = d.status === 'cancelled';
+  host.innerHTML = `<div class="po-public">
+    <div class="po-public-head"><span class="po-public-brand">Nifti</span><span style="opacity:.7;font-size:14px;">Delivery${d.partner_name ? ' for ' + escapeHtml(d.partner_name) : ''}</span></div>
+    <div class="po-public-card">
+      <div style="font-size:14px;opacity:.7;">From ${escapeHtml(d.supplier_name)} to ${escapeHtml(d.buyer_name)}</div>
+      <h1 style="font-size:24px;margin:2px 0 8px;">${escapeHtml(d.po_number)}</h1>
+      <span class="po-public-status ${tone}">${escapeHtml(statusLabel)}</span>
+      <div class="po-public-table-wrap"><table class="po-public-table"><thead><tr><th>Item</th><th style="text-align:right;">Qty</th></tr></thead>
+        <tbody>${(d.line_items||[]).map(li => `<tr><td>${escapeHtml(li.product)}</td><td style="text-align:right;">${escapeHtml(li.qty)}</td></tr>`).join('')}</tbody></table></div>
+      ${d.delivery_address ? `<div class="po-public-row">📍 <strong>Deliver to:</strong> ${escapeHtml(d.delivery_address)} · <a href="https://maps.google.com/?q=${encodeURIComponent(d.delivery_address)}" target="_blank" rel="noopener">Map</a></div>` : ''}
+      ${d.requested_delivery_date ? `<div class="po-public-row">📅 <strong>Needed by:</strong> ${escapeHtml(d.requested_delivery_date)}</div>` : ''}
+      ${contact(d.buyer_contact) ? `<div class="po-public-row">👤 <strong>Receiver:</strong> ${contact(d.buyer_contact)}</div>` : ''}
+      ${contact(d.supplier_contact) ? `<div class="po-public-row">🏭 <strong>Pickup / sender:</strong> ${contact(d.supplier_contact)}</div>` : ''}
+      ${d.notes ? `<div class="po-public-row">📝 ${escapeHtml(d.notes)}</div>` : ''}
+    </div>
+    ${closed ? `<div class="po-public-card">This order was cancelled. No delivery needed.</div>` : `<div class="po-public-card">
+      <label class="po-public-label">Your name</label><input id="poPubName" type="text" maxlength="80" value="${escapeHtml(savedName)}" placeholder="Driver / rider name">
+      ${!done && ['confirmed','preparing'].includes(d.status) ? `<label class="po-public-label">Arriving on (optional)</label><input id="poPubEta" type="date">
+        <button class="btn btn-primary po-public-big" onclick="publicOrderRespond('picked_up')">🚚 Picked up, on the way</button>` : ''}
+      ${!done ? `<label class="po-public-label">Received by (optional)</label><input id="poPubNote" type="text" maxlength="200" placeholder="e.g. Guard Ben">
+        <button class="btn btn-primary po-public-big" onclick="publicOrderRespond('delivered')">📦 Delivered</button>` : `<div style="font-weight:700;color:var(--green);margin-bottom:8px;">✓ Delivered. Thank you!</div>`}
+      <textarea id="poPubMsg" rows="2" maxlength="500" placeholder="Message about this delivery, e.g. Traffic, arriving 30 mins late"></textarea>
+      <button class="btn btn-outline po-public-big" onclick="publicOrderRespond('note')">Send message</button>
+      <div id="poPubError" class="po-public-error"></div></div>`}
+    <div style="text-align:center;font-size:13px;opacity:.6;margin:10px 0 30px;">Sent with Nifti</div>
+  </div>`;
+  window.scrollTo(0, 0);
+}
+
+// ---- Exports (CSV opens in Excel / Google Sheets) ----
+function exportPaymentsToCsv(){
+  const side = currentAppRole;
+  const orders = (side === 'buyer' ? getBuyerPOs() : getSupplierPOs()).filter(o => o.invoice || (o.depositPayments||[]).length);
+  const rows = [['Order #', side === 'buyer' ? 'Supplier' : 'Buyer', 'Invoice #', 'Paid on', 'Method', 'Reference', 'Amount (PHP)', 'Status']];
+  orders.forEach(o => {
+    const who = side === 'buyer' ? o.supplierName : o.buyerName;
+    ((o.invoice && o.invoice.payments) || []).concat(o.depositPayments || []).forEach(p => rows.push([o.poNumber, who, o.invoice ? o.invoice.number : 'Deposit', p.date || '', p.method || '', p.reference || '', p.amount, p.confirmStatus || 'confirmed']));
+  });
+  downloadCsv(`nifti-payments-${side}-${APP_TODAY}.csv`, rows);
+}
+
+// ---- Quick send to Viber/WhatsApp right after sending an order ----
+function quickSharePromptOn(){ try{ return localStorage.getItem('nifti-quick-share') !== 'off'; }catch(e){ return true; } }
+function toggleQuickSharePrompt(){
+  const next = !quickSharePromptOn();
+  try{ localStorage.setItem('nifti-quick-share', next ? 'on' : 'off'); }catch(e){}
+  const t = document.getElementById('quickShareToggle'); if(t) t.classList.toggle('on', next);
+  showToast(next ? "After each order you'll get a one-tap Viber/WhatsApp send." : 'Turned off.', 'success');
+}
+// Suppliers already on Nifti get the order in-app; this also hands the buyer a link to drop in
+// the old Viber group so nobody misses it during the switch.
+function promptQuickShareOrder(po){
+  if(!po || isOutsideSupplier(po.supplierId) || !quickSharePromptOn() || currentAppRole !== 'buyer') return;
+  const m = document.createElement('div');
+  m.className = 'share-modal-backdrop';
+  m.id = 'orderShareModal';
+  m.onclick = e => { if(e.target === m) m.remove(); };
+  m.innerHTML = `<div class="share-modal">
+    <div style="font-size:19px;font-weight:800;margin-bottom:4px;">✓ Sent to ${escapeHtml(po.supplierName)}</div>
+    <div style="font-size:15px;opacity:.85;margin-bottom:14px;">They got it in Nifti. Also posting it in your Viber group? Send the link there too so everyone sees the same order.</div>
+    <div id="orderShareBody_${po.id}"><div style="font-size:14.5px;opacity:.7;">Preparing the link…</div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:10px;flex-wrap:wrap;">
+      <span class="row-action" style="font-size:13.5px;" onclick="toggleQuickSharePrompt(); document.getElementById('orderShareModal').remove()">Don't show this again</span>
+      <button class="btn btn-outline" onclick="document.getElementById('orderShareModal').remove()">Done</button></div>
+  </div>`;
+  document.body.appendChild(m);
+  ensureOrderLink(po);
+}
+
+// ---- Bulk invite from contacts (was 4 made-up companies) ----
+let bulkInviteRows = [];
+function openBulkInviteModal(){
+  const canPick = 'contacts' in navigator && 'ContactsManager' in window;
+  document.getElementById('bulkContactsList').innerHTML = `
+    ${canPick ? `<button class="btn btn-primary" style="width:100%;margin-bottom:12px;" onclick="pickPhoneContacts()">📇 Choose from my phone contacts</button>` : ''}
+    <div style="font-size:14.5px;margin-bottom:6px;">${canPick ? 'Or paste' : 'Paste'} a list, one per line: <strong>name, mobile number</strong></div>
+    <textarea id="bulkPasteBox" rows="6" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:15px;" placeholder="Metro Steel Co., 0917 123 4567&#10;Cebu Aggregates, 0918 222 3333" oninput="parseBulkPaste()"></textarea>
+    <div id="bulkPreview" style="margin-top:10px;"></div>`;
+  bulkInviteRows = [];
+  document.getElementById('bulkInviteModal').classList.remove('hidden');
+}
+async function pickPhoneContacts(){
+  try{
+    const picked = await navigator.contacts.select(['name','tel'], {multiple: true});
+    const lines = picked.map(c => `${(c.name && c.name[0]) || ''}, ${(c.tel && c.tel[0]) || ''}`).filter(l => l.replace(/[,\s]/g,''));
+    const box = document.getElementById('bulkPasteBox');
+    box.value = (box.value.trim() ? box.value.trim() + '\n' : '') + lines.join('\n');
+    parseBulkPaste();
+  }catch(e){ /* cancelled */ }
+}
+function parseBulkPaste(){
+  const text = document.getElementById('bulkPasteBox').value;
+  const existing = new Set((currentAppRole === 'buyer' ? suppliersData : buyersData).map(p => p.name.toLowerCase()));
+  const seen = new Set();
+  bulkInviteRows = text.split(/\n+/).map(l => l.trim()).filter(Boolean).slice(0, 50).map(l => {
+    const phoneMatch = l.match(/(\+?63|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}/);
+    const phone = phoneMatch ? phoneMatch[0].replace(/[\s-]/g,'') : '';
+    const name = stripMarkup(l.replace(phoneMatch ? phoneMatch[0] : '', '').replace(/[,;\t|]+/g,' ').trim()).slice(0,120);
+    return {name, phone};
+  }).filter(r => r.name.length >= 2 && !seen.has(r.name.toLowerCase()) && seen.add(r.name.toLowerCase()))
+    .map(r => Object.assign(r, {already: existing.has(r.name.toLowerCase())}));
+  const fresh = bulkInviteRows.filter(r => !r.already);
+  document.getElementById('bulkPreview').innerHTML = bulkInviteRows.length ? `<div style="font-weight:700;font-size:14.5px;margin-bottom:4px;">${fresh.length} to add</div>` +
+    bulkInviteRows.map(r => `<div style="font-size:14.5px;padding:4px 0;border-bottom:1px dashed var(--border);${r.already ? 'opacity:.5;' : ''}">${escapeHtml(r.name)} <span style="opacity:.65;">${escapeHtml(r.phone || 'no number')}</span>${r.already ? ' · already in your list' : ''}</div>`).join('') : '';
+}
+function closeBulkInviteModal(){ document.getElementById('bulkInviteModal').classList.add('hidden'); }
+async function submitBulkInvite(){
+  const rows = bulkInviteRows.filter(r => !r.already);
+  if(!rows.length){ showToast('Add at least one name.'); return; }
+  const isBuyer = currentAppRole === 'buyer';
+  const done = [];
+  for(const r of rows){
+    let link = appBaseUrl();
+    if(myBusiness && isBuyer){
+      const { data: newId, error } = await sb.rpc('create_outside_supplier', {p_name: r.name, p_phone: r.phone || null, p_email: null});
+      if(error){ showToast(`Couldn't add ${r.name}: ${error.message}`, 'error'); continue; }
+      const { data: biz } = await sb.from('businesses').select('claim_code').eq('id', newId).single();
+      if(biz && biz.claim_code) link = appBaseUrl() + '#join/' + biz.claim_code;
+    } else if(!myBusiness) link = appBaseUrl() + '#join/demo-link';
+    done.push(Object.assign({link}, r));
+  }
+  if(myBusiness && isBuyer){ await loadMyConnections(); if(document.getElementById('suppliersGrid')) renderSuppliersTable(); renderInvitesList(); }
+  closeBulkInviteModal();
+  const out = document.getElementById('inviteResult');
+  if(out && done.length){
+    out.innerHTML = `<div class="share-box" style="margin-top:12px;">
+      <div style="font-weight:800;font-size:16px;">✓ ${done.length} ${isBuyer ? 'added to your suppliers' : 'ready to invite'}</div>
+      <div style="font-size:14.5px;opacity:.85;margin:2px 0 10px;">Send each one their invite. It comes from your own Viber/WhatsApp/SMS, so it's free.</div>
+      ${done.map((r, i) => `<div style="padding:8px 0;border-top:1px solid var(--border);"><div style="font-weight:700;margin-bottom:6px;">${escapeHtml(r.name)} <span style="opacity:.6;font-weight:400;">${escapeHtml(r.phone)}</span></div>
+        ${shareButtonsHtml('bulk:' + i + ':' + Date.now(), `Hi ${r.name}! This is ${inviteSelfName()}. We're moving our orders to Nifti so nothing gets lost in chat. It's free, and you can confirm orders from a link without signing up:\n${r.link}`)}</div>`).join('')}
+    </div>`;
+    navigate('invite');
+    setTimeout(() => out.scrollIntoView({behavior:'smooth', block:'start'}), 100);
+  }
+  trackEvent('supplier_invite_sent', {count: done.length, channels: ['bulk']});
+}
+
+// ---- Voice typing in chat (was a random sample sentence) ----
+let voiceRecognizer = null;
+function recordVoiceNote(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const btn = document.querySelector('.composer-attach-btn[onclick="recordVoiceNote()"]');
+  if(!SR){ showToast("Voice typing isn't supported in this browser. Tap the 🎤 on your phone's keyboard instead.", 'error'); return; }
+  if(voiceRecognizer){ voiceRecognizer.stop(); return; }
+  const input = document.getElementById('msgInput');
+  if(!input) return;
+  const rec = new SR();
+  rec.lang = currentLanguage === 'FIL' ? 'fil-PH' : 'en-PH';
+  rec.interimResults = true;
+  rec.continuous = false;
+  const base = input.value ? input.value.replace(/\s*$/, ' ') : '';
+  rec.onresult = e => {
+    const text = Array.from(e.results).map(r => r[0].transcript).join('');
+    input.value = base + text;
+    autoResizeComposer(input);
+  };
+  rec.onerror = e => { if(e.error === 'not-allowed') showToast('Allow the microphone for this site to use voice typing.', 'error'); else if(e.error !== 'no-speech' && e.error !== 'aborted') showToast("Couldn't hear that. Try again.", 'error'); };
+  rec.onend = () => { voiceRecognizer = null; if(btn){ btn.textContent = '🎤'; btn.style.background = ''; } input.focus(); };
+  voiceRecognizer = rec;
+  if(btn){ btn.textContent = '⏺'; btn.style.background = 'rgba(220,60,60,.15)'; }
+  showToast('Listening… speak now, tap 🎤 again to stop.');
+  rec.start();
+}
+
+// ---- Live status page (was a hardcoded "All systems operational") ----
+async function renderStatusPage(){
+  const el = document.getElementById('statusLiveContent');
+  if(!el) return;
+  el.innerHTML = '<div class="settings-card"><div class="sub">Checking…</div></div>';
+  const checks = [];
+  const t0 = performance.now();
+  let db = null;
+  try{ const { data, error } = await Promise.race([sb.rpc('nifti_health'), new Promise(r => setTimeout(() => r({error: 'timeout'}), 6000))]); if(!error) db = data; }catch(e){}
+  const ms = Math.round(performance.now() - t0);
+  checks.push({name: 'Orders, messages & payments (database)', ok: !!db, note: db ? `responding in ${ms} ms` : "can't reach it right now"});
+  checks.push({name: 'Your internet connection', ok: navigator.onLine, note: navigator.onLine ? 'online' : 'offline, changes will sync when you reconnect'});
+  const rtOk = (() => { try{ const ch = sb.getChannels ? sb.getChannels() : []; return ch.length === 0 ? null : ch.some(c => c.state === 'joined'); }catch(e){ return null; } })();
+  if(rtOk !== null) checks.push({name: 'Live updates', ok: rtOk, note: rtOk ? 'connected' : 'reconnecting, new messages may take a moment'});
+  if(db) checks.push({name: 'Phone notifications', ok: Number(db.notifications_pending) < 20, note: Number(db.notifications_pending) ? `${db.notifications_pending} waiting to go out` : 'going out normally'});
+  let notices = [];
+  try{ const { data } = await sb.from('system_notices').select('*').or('ends_at.is.null,ends_at.gt.' + new Date().toISOString()).order('starts_at', {ascending:false}).limit(5); notices = data || []; }catch(e){}
+  const allOk = checks.every(c => c.ok) && !notices.some(n => n.level === 'incident');
+  el.innerHTML = `<div class="settings-card">
+      <h2 style="color:${allOk ? 'var(--green)' : 'var(--danger)'};">${allOk ? '✓ Everything is working' : '⚠ Something isn\'t working right'}</h2>
+      <div class="sub">Checked just now from this device. <span class="row-action" onclick="renderStatusPage()">Check again</span></div>
+      ${checks.map(c => `<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);"><span>${c.ok ? '🟢' : '🔴'} ${c.name}</span><span style="opacity:.7;font-size:14px;text-align:right;">${c.note}</span></div>`).join('')}
+    </div>
+    <div class="settings-card"><h2>Announcements</h2>
+      ${notices.length ? notices.map(n => `<div style="padding:8px 0;border-bottom:1px solid var(--border);"><div style="font-weight:700;">${n.level === 'incident' ? '🔴' : n.level === 'maintenance' ? '🛠' : 'ℹ️'} ${escapeHtml(n.title)}</div>${n.body ? `<div style="font-size:14.5px;opacity:.85;">${escapeHtml(n.body)}</div>` : ''}<div style="font-size:12.5px;opacity:.6;">${new Date(n.starts_at).toLocaleString('en-PH',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</div></div>`).join('')
+        : '<div class="sub" style="margin:0;">No maintenance or problems announced.</div>'}
+    </div>
+    <div class="settings-card"><h2>If Nifti is down</h2><div class="sub" style="margin:0;">Order the old way (call or Viber) and add it here later with "Paste from Viber", so your records stay complete.</div></div>`;
+}
+
+// ---- Google sign-in (off until the Google provider is switched on in Supabase) ----
+const NIFTI_GOOGLE_SIGNIN = false;
+function renderGoogleSignInButtons(){
+  if(!NIFTI_GOOGLE_SIGNIN) return;
+  ['signinView','signupView'].forEach(id => {
+    const v = document.getElementById(id);
+    if(!v || v.querySelector('.google-btn')) return;
+    const btn = document.createElement('div');
+    btn.innerHTML = `<button type="button" class="btn btn-outline google-btn" style="width:100%;margin:6px 0 14px;display:flex;gap:8px;justify-content:center;align-items:center;" onclick="signInWithGoogle()"><span style="font-weight:800;color:#4285F4;">G</span> Continue with Google</button>
+      <div style="text-align:center;font-size:13px;opacity:.6;margin-bottom:10px;">or use your email</div>`;
+    const firstField = v.querySelector('.field');
+    if(firstField) firstField.before(btn); else v.prepend(btn);
+  });
+}
+async function signInWithGoogle(){
+  const { error } = await sb.auth.signInWithOAuth({provider: 'google', options: {redirectTo: appBaseUrl()}});
+  if(error) showToast("Couldn't open Google sign-in: " + error.message, 'error');
+}
+// First Google sign-in creates a placeholder business; ask for the real name and type once.
+function maybeFinishBusinessSetup(){
+  if(!myBusiness || myBusiness.name !== 'New Business' || document.getElementById('finishSetupModal')) return;
+  const m = document.createElement('div');
+  m.className = 'share-modal-backdrop'; m.id = 'finishSetupModal';
+  m.innerHTML = `<div class="share-modal">
+    <div style="font-size:19px;font-weight:800;margin-bottom:4px;">Welcome to Nifti 👋</div>
+    <div style="font-size:15px;opacity:.85;margin-bottom:12px;">Two quick things so your partners know who you are.</div>
+    <div class="field"><label>Business name</label><input id="fsName" maxlength="120" placeholder="e.g. Dela Cruz Hardware"></div>
+    <div class="field"><label>You mainly…</label><select id="fsType"><option value="buyer">Buy from suppliers</option><option value="supplier">Sell to businesses</option></select></div>
+    <div id="fsError" style="color:var(--danger);font-weight:600;font-size:14px;margin:6px 0;"></div>
+    <button class="btn btn-primary" style="width:100%;" onclick="submitFinishBusinessSetup()">Continue</button></div>`;
+  document.body.appendChild(m);
+}
+async function submitFinishBusinessSetup(){
+  const name = document.getElementById('fsName').value.trim();
+  const type = document.getElementById('fsType').value;
+  const { error } = await sb.rpc('finish_business_setup', {p_name: name, p_type: type});
+  if(error){ document.getElementById('fsError').textContent = error.message; return; }
+  location.reload();
+}
+
 function renderSidebarForViewAsRole(){
   const allowed = computeAllowedPages(getEffectiveRoles());
   document.querySelectorAll('.nav-item[data-page], .bnav-item[data-page], .more-sheet-item[data-page]').forEach(el => {
@@ -6174,6 +6964,7 @@ function navigate(page){
     if(page==='team'){ renderTeamPage(); }
     if(page==='sales'){ renderSalesPage(); }
     if(page==='discover'){
+      if(myBusiness){ realIncomingRequests = null; realDiscover.suppliers = null; realDiscover.buyers = null; }
       const wantSuppliers = currentAppRole === 'buyer';
       setDiscView(wantSuppliers ? 'suppliers' : 'buyers');
       renderMyCatalogPanel();
@@ -6216,7 +7007,8 @@ function navigate(page){
     if(page==='messages'){ updateInstallButtonVisibility(); maybeAutoRequestNotifications(); }
     if(page==='suppliers'){ renderSupplierChips(); renderSuppliersTable(); }
     if(page==='invite'){ renderInvitesList(); updatePreview(); }
-    if(page==='settings'){ renderTeamMembersList(); renderCustomRolesList(); renderBillingSettings(); renderReferralPanel(); renderNotificationSettingsPanel(); renderPushLogPanel(); renderTaxProfileSettings(); renderPaymentDetailsSettings(); renderBirDeadlineCard(); renderApprovalThresholdSettings(); renderAuditLogContent(); renderDownstreamSalesSettingsCard(); renderSupportContactForm(); }
+    if(page==='status') renderStatusPage();
+    if(page==='settings'){ renderPauseCard(); renderSharedContactCard(); renderLogisticsPartnersCard(); renderShareLinksCard(); { const qs = document.getElementById('quickShareToggle'); if(qs) qs.classList.toggle('on', quickSharePromptOn()); } document.querySelectorAll('.buyerPublicToggle').forEach(t => t.classList.toggle('on', myBusiness ? !!myBusiness.catalog_public : (currentAppRole==='supplier' ? myCatalogPublic : myBuyerProfilePublic))); renderTeamMembersList(); renderCustomRolesList(); renderBillingSettings(); renderNotificationSettingsPanel(); renderPushLogPanel(); renderTaxProfileSettings(); renderPaymentDetailsSettings(); renderBirDeadlineCard(); renderApprovalThresholdSettings(); renderAuditLogContent(); renderDownstreamSalesSettingsCard(); renderSupportContactForm(); }
   }
   window.scrollTo(0,0);
 }
@@ -6327,20 +7119,6 @@ function simulateSmsConfirm(){
   if(!row) return;
   row.innerHTML = `<div><div class="invite-name">Bulacan Rice Traders</div><div class="invite-meta">Replied "confirmed" via SMS — lightweight account auto-created</div></div><div style="display:flex;align-items:center;gap:14px;"><span class="status-pill pill-joined">Joined</span><span class="row-action" style="color:var(--danger);" onclick="deleteInvite(this)">Delete</span></div>`;
   showToast('Bulacan Rice Traders replied "confirmed" over SMS. A lightweight account was created automatically — no signup form, no app download, no separate step.', 'success');
-}
-// Section 7 #20 — "Record a voice note": shows a transcribed text placeholder. This is standard
-// speech-to-text transcription, not predictive or generative AI.
-const VOICE_NOTE_SAMPLES = [
-  "Can you confirm the delivery date for this order? We need it before end of month.",
-  "The last batch had two damaged bags, please double-check packing this time.",
-  "Please send the updated price list when you get a chance.",
-];
-function recordVoiceNote(){
-  const sample = VOICE_NOTE_SAMPLES[Math.floor(Math.random()*VOICE_NOTE_SAMPLES.length)];
-  const input = document.getElementById('msgInput');
-  if(!input) return;
-  input.value = (input.value ? input.value+' ' : '') + `🎤 [Voice note — transcribed]: "${sample}"`;
-  autoResizeComposer(input);
 }
 function toggleLanguage(){
   currentLanguage = currentLanguage === 'EN' ? 'FIL' : 'EN';
@@ -11555,6 +12333,7 @@ function renderBuyerPoDetail(o){
     <div style="font-size:16px;color:var(--ink);margin-bottom:6px;"><strong>Requested delivery:</strong> ${o.requestedDeliveryDate} · <strong>Ship to:</strong> ${o.deliveryAddress}</div>
     ${o.riskNote ? `<div class="logi-note" style="color:var(--danger);">⏱ ${o.riskNote}</div>` : ''}
     ${renderOrderShareBox(o)}
+    ${renderDeliveryPartnerBox(o)}
     ${renderUndoBanner(o, 'buyer')}
     ${renderRmaBanner(o)}
     ${renderSupplierPodBanner(o)}
@@ -12180,6 +12959,7 @@ function sendDraftPO(id){
   if(document.getElementById('supplierOrderRows')) renderSupplierOrdersTable();
   refreshOrderModalIfOpen(po.id);
   promptSendToOutsideSupplier(po);
+  promptQuickShareOrder(po);
 }
 // Section 5 #11 — concurrent-draft-editing lock. A real second teammate isn't reachable in this
 // single-browser prototype, so "Simulate: teammate opens this draft" stands in for that second
@@ -14744,6 +15524,7 @@ function renderSupplierPoDetail(o){
     ${renderDepositSection(o, 'supplier')}
     <div class="expand-actions" style="margin-top:16px;">${actionsHtml}</div>
     ${renderSupplierPaymentsBlock(o)}
+    ${renderDeliveryPartnerBox(o)}
     <div class="expand-actions" style="margin-top:12px;">
       <button class="btn btn-outline" onclick="event.stopPropagation(); openInlineMessage('${o.buyerId}','${o.id}')">💬 Message ${o.buyerName}</button>
     </div>
@@ -15374,44 +16155,6 @@ function renderInvitesList(){
     ${outside.map(s => `<div class="invite-row" style="flex-wrap:wrap;"><div><div class="invite-name">${escapeHtml(s.name)}</div><div class="invite-meta">${escapeHtml([s.outsideContact && s.outsideContact.phone, s.outsideContact && s.outsideContact.email].filter(Boolean).join(' · ') || 'Added by you')}</div></div>
       <span class="row-action" onclick="resendInvite('${s.id}')">Send invite again →</span><div id="resendInvite_${s.id}" style="width:100%;"></div></div>`).join('')}` : '';
 }
-// Section 6 #15 — bulk invite from contacts
-const MOCK_CONTACTS = [
-  {name:'Iron Gate Fabrication', phone:'0917 555 0182'},
-  {name:'Cavite Aggregates Co.', phone:'0918 442 7710'},
-  {name:'Rizal Paint Supply', phone:'0919 220 3345'},
-  {name:'Antipolo Lumber Yard', phone:'0917 880 1123'},
-];
-function openBulkInviteModal(){
-  // MOCK_CONTACTS is entirely fictitious demo data (Iron Gate Fabrication, etc.) with no real
-  // backing — unlike the single-invite form (blanked of its demo values by applyRealAccountUI,
-  // and commitSendInvite genuinely writes to business_invites), this whole flow has no real path
-  // at all. A real account clicking through it would "invite" fake companies and see a permanent
-  // "✓ Invited" success message with nothing ever sent — same class of issue commitSendInvite was
-  // just fixed for, on the single-invite form right next to this one.
-  if(myBusiness){ showToast("Bulk invite from contacts isn't available yet for live accounts — use the invite form above to invite a real supplier by email.", 'error'); return; }
-  document.getElementById('bulkContactsList').innerHTML = MOCK_CONTACTS.map((c,i)=>`
-    <label style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--border);font-size:15.5px;">
-      <input type="checkbox" id="bulkContact_${i}"> <span style="font-weight:700;">${c.name}</span> <span style="color:var(--ink);opacity:.65;">${c.phone}</span>
-    </label>`).join('');
-  document.getElementById('bulkInviteModal').classList.remove('hidden');
-}
-function closeBulkInviteModal(){
-  document.getElementById('bulkInviteModal').classList.add('hidden');
-}
-function submitBulkInvite(){
-  const selected = MOCK_CONTACTS.filter((c,i)=>document.getElementById('bulkContact_'+i).checked);
-  if(!selected.length){ showToast('Please select at least one contact.'); return; }
-  if(!requireSupplierCapacity(selected.length)) return;
-  selected.forEach(c=>{
-    const row = document.createElement('div');
-    row.className = 'invite-row';
-    row.innerHTML = `<div><div class="invite-name">${c.name}</div><div class="invite-meta">Sent just now</div></div><div style="display:flex;align-items:center;gap:14px;"><span class="status-pill pill-sent">Pending</span><span class="row-action" style="color:var(--danger);" onclick="deleteInvite(this)">Delete</span></div>`;
-    document.querySelector('#page-invite .status-list').appendChild(row);
-  });
-  closeBulkInviteModal();
-  showToast(`Invited ${selected.length} contact${selected.length===1?'':'s'}.`, 'success');
-  trackEvent('supplier_invite_sent', {count:selected.length, channels:['bulk']});
-}
 // Section 6 #4, #13, #20 — read-only preview of what the supplier experiences after accepting:
 // the buyer's business name and delivery address auto-populated (labeled "provided by"), plus
 // an auto-generated draft first PO built from the invite's note, ready for them to review.
@@ -15545,7 +16288,7 @@ function computeDiscoverPriceInsights(){
   myProducts.forEach(product => {
     const mine = findMyCurrentPriceFor(product);
     if(!mine) return;
-    supplierProfiles.filter(p=>p.catalogPublic && p.catalog).forEach(p=>{
+    discoverProfiles('suppliers').filter(p=>p.catalogPublic && p.catalog).forEach(p=>{
       p.catalog.forEach(c=>{
         if(productNamesLikelyMatch(c.product, product) && c.price < mine.price){
           opportunities.push({product, myPrice:mine.price, myUnit:mine.unit, mySupplier:mine.supplierName, theirPrice:c.price, theirSupplier:p.n, savingsPct: ((mine.price-c.price)/mine.price)*100});
@@ -15568,21 +16311,21 @@ function renderDiscoverPriceInsightsCard(){
   </div>`;
 }
 function renderDiscoverCategoryChips(mode){
-  const fullList = mode==='suppliers' ? supplierProfiles : buyerProfiles;
+  const fullList = discoverProfiles(mode);
   const categories = [...new Set(fullList.map(p=>p.cat))];
   const el = document.getElementById('discCategoryChips');
   if(!el) return;
   el.innerHTML = `<div class="chip ${discCategoryFilter==='all'?'active':''}" onclick="setDiscCategoryFilter('all', this)">All (${fullList.length})</div>` +
     categories.map(cat => {
       const count = fullList.filter(p=>p.cat===cat).length;
-      return `<div class="chip ${discCategoryFilter===cat?'active':''}" onclick="setDiscCategoryFilter('${cat}', this)">${cat} (${count})</div>`;
+      return `<div class="chip ${discCategoryFilter===cat?'active':''}" onclick='setDiscCategoryFilter(${escapeHtml(JSON.stringify(cat))}, this)'>${escapeHtml(cat)} (${count})</div>`;
     }).join('');
 }
 function setDiscCategoryFilter(cat, el){
   discCategoryFilter = cat;
   document.querySelectorAll('#discCategoryChips .chip').forEach(c=>c.classList.remove('active'));
   if(el) el.classList.add('active');
-  renderDiscover(window._discListMode==='suppliers' ? supplierProfiles : buyerProfiles, window._discListMode);
+  renderDiscover(discoverProfiles(window._discListMode), window._discListMode);
 }
 // Filters to the category a buyer (or supplier) actually cares about — an agricultural buyer
 // browsing grain suppliers has no use for cement or poultry connections cluttering the list.
@@ -15594,12 +16337,12 @@ function renderDiscover(list, mode){
     const catalogToggle = (p.catalogPublic && p.catalog && p.catalog.length) ? `<span class="row-action" style="display:block;margin-top:10px;" onclick="toggleDiscCatalog(${realIdx})">${'View catalog & pricing (' + p.catalog.length + ' items) ▾'}</span><div id="discCatalog_${realIdx}" class="hidden" style="margin-top:8px;"></div>` : '';
     return `
     <div class="disc-card">
-      <div class="disc-top"><div><div class="disc-name">${p.n}</div><div class="disc-cat">${p.cat}</div></div><span class="disc-badge" style="background:${c.bg};">${p.badge}</span></div>
-      <div class="disc-desc">${p.desc}</div>
+      <div class="disc-top"><div><div class="disc-name">${escapeHtml(p.n)}</div><div class="disc-cat">${escapeHtml(p.cat)}</div></div><span class="disc-badge" style="background:${c.bg};">${escapeHtml(p.badge)}</span></div>
+      <div class="disc-desc">${escapeHtml(p.desc)}</div>
       ${catalogToggle}
-      <div id="discAction_${realIdx}"><button class="btn-connect" style="margin-top:10px;" onclick="sendDiscoveryRequest(${realIdx}, '${mode}')">Send connection request</button></div>
+      ${renderDiscAction(p, realIdx, mode)}
     </div>`;
-  }).join('') || `<div style="padding:30px;text-align:center;color:var(--ink);opacity:.6;font-size:15px;grid-column:1/-1;">No ${mode} match this category.</div>`;
+  }).join('') || `<div style="padding:30px;text-align:center;color:var(--ink);opacity:.6;font-size:15px;grid-column:1/-1;">${(myBusiness && !list.length) ? (realDiscover[mode] === null ? 'Loading…' : `No ${mode} are listed yet. We're in early access, so more join every week. Invite the ones you already work with from ${mode==='suppliers'?'Suppliers':'Buyers'}.`) : `No ${mode} match this category.`}</div>`;
   window._discListRef = list;
   window._discListMode = mode;
 }
@@ -15616,6 +16359,7 @@ function renderMyCatalogPanel(){
   // used to make this function bail out before ever reaching the line that shows it.
   const linkNote = document.getElementById('myCatalogLinkNote');
   if(linkNote) linkNote.classList.toggle('hidden', currentAppRole !== 'supplier');
+  scheduleCatalogServerSync();
   if(!document.getElementById('myCatalogList')) return;
   const panel = document.getElementById('myCatalogPanel');
   if(!panel) return; // supplier hasn't opened Inventory yet — nothing to refresh
@@ -15724,6 +16468,7 @@ function saveCatalogPhoto(i, dataUrl){
 }
 function toggleMyCatalogPublic(){
   if(!requirePermission('manageCatalog')) return;
+  if(myBusiness) return toggleRealPublic().then(renderMyCatalogPanel);
   myCatalogPublic = !myCatalogPublic;
   renderMyCatalogPanel();
   if(document.getElementById('discoveryLeadsContent')) renderDiscoveryLeadsPanel();
@@ -15812,6 +16557,7 @@ function submitMassPhotoUpload(){
 // currently being viewed — a blanket class sync would bleed supplier state into it while
 // viewing as buyer or vice versa.
 function handleDiscPublicToggle(){
+  if(myBusiness) return toggleRealPublic();
   if(currentAppRole === 'supplier') toggleMyCatalogPublic(); else toggleMyBuyerProfilePublic();
   const toggle = document.getElementById('discPublicToggle');
   if(toggle) toggle.classList.toggle('on', currentAppRole==='supplier' ? myCatalogPublic : myBuyerProfilePublic);
@@ -15939,14 +16685,16 @@ function toggleDiscCatalog(idx){
   if(!el || !p) return; // stale reference from before the list was last re-rendered (e.g. a filter changed) — nothing to toggle
   if(el.innerHTML.trim() !== ''){ el.innerHTML=''; return; }
   el.innerHTML = `<table style="width:100%;font-size:15px;"><thead><tr><th>Product</th><th>Price</th><th>Min. order</th></tr></thead><tbody>
-    ${p.catalog.map(c=>`<tr><td>${c.product}${currentAppRole==='buyer' ? renderPriceCompareBadge(c.product, c.price) : ''}</td><td>${fmtPHP(c.price)}/${c.unit}</td><td>${c.moq} ${c.unit}s</td></tr>`).join('')}
+    ${p.catalog.map(c=>`<tr><td>${escapeHtml(c.product)}${currentAppRole==='buyer' ? renderPriceCompareBadge(c.product, c.price) : ''}</td><td>${fmtPHP(c.price)}/${c.unit}</td><td>${c.moq} ${c.unit}s</td></tr>`).join('')}
   </tbody></table>`;
 }
 function setDiscView(v){
   discCategoryFilter = 'all'; // categories differ between the two lists — carrying a selection across would silently show zero results
   document.getElementById('discViewLabel').textContent = v==='suppliers' ? 'Browsing suppliers' : 'Browsing buyers';
   renderDiscoverCategoryChips(v);
-  renderDiscover(v==='suppliers' ? supplierProfiles : buyerProfiles, v);
+  renderDiscover(discoverProfiles(v), v);
+  if(myBusiness && !realDiscover[v]) loadRealDiscover(v).then(() => { renderDiscoverCategoryChips(v); renderDiscover(discoverProfiles(v), v); renderDiscoverPriceInsightsCard(); });
+  renderPublicProfileForm();
   const toggleTxt = document.getElementById('discToggleTxt');
   const toggleSub = document.getElementById('discToggleSub');
   const noteTitle = document.getElementById('discNoteTitle');
@@ -20388,56 +21136,8 @@ function markOnboardingActionTaken(){
 
 // ---- Referral tracking ----
 NiftiDB.referrals = {code:null, invited:[]}; // persisted — see collectNiftiPersistableState/applyNiftiPersistedState
-const REFERRAL_SIMULATED_NAMES = ['Bataan Hardware Supply','Rizal Fasteners Inc.','Quezon Builders Depot','Laguna Steel Traders'];
-function ensureReferralCode(){
-  if(NiftiDB.referrals.code) return NiftiDB.referrals.code;
-  const base = myBusiness
-    ? (myBusiness.name.replace(/[^A-Za-z0-9]/g,'').toUpperCase().slice(0,12) || 'BUSINESS')
-    : (currentAppRole==='buyer' ? 'DELACRUZ' : 'METROSTEEL');
-  NiftiDB.referrals.code = 'NIFTI-'+base+'-'+Math.floor(1000+Math.random()*8999);
-  scheduleNiftiSave();
-  return NiftiDB.referrals.code;
-}
-function getReferralLink(){ return 'https://nifti.app/join?ref='+ensureReferralCode(); }
-function copyReferralLink(){
-  const link = getReferralLink();
-  if(navigator.clipboard) navigator.clipboard.writeText(link);
-  showToast('Referral link copied.', 'success');
-}
 // Same pattern as the existing SMS-confirm simulation elsewhere in this build — a labeled
 // simulate action standing in for a real signup event this artifact has no server to receive.
-function simulateReferralSignup(){
-  // Same class of issue Discover/bulk-invite were fixed for: this is a demo-only simulation
-  // button, rendered unconditionally for every account, that writes a fabricated "1 month free"
-  // credit line straight into this account's own billing history via addBillingHistoryEntry below
-  // — for a real account that reads as a genuine referral reward with no real referral behind it.
-  if(myBusiness){ showToast("Referral simulation isn't available for live accounts — real referral rewards post automatically when someone actually joins through your link.", 'error'); return; }
-  const name = REFERRAL_SIMULATED_NAMES[NiftiDB.referrals.invited.length % REFERRAL_SIMULATED_NAMES.length];
-  NiftiDB.referrals.invited.push({name, joinedDate:APP_TODAY});
-  addBillingHistoryEntry(`Referral reward — 1 month free (${name} joined via your link)`, 0, 'credit');
-  logAudit('referral_joined', 'referral', name, 'joined', null, APP_TODAY);
-  trackEvent('referral_signup', {referredName:name});
-  scheduleNiftiSave();
-  renderReferralPanel();
-  showToast(`${name} joined using your referral link — 1 month free applied to your billing.`, 'success');
-}
-function renderReferralPanel(){
-  const el = document.getElementById('referralPanelContent');
-  if(!el) return;
-  const link = getReferralLink();
-  const invited = NiftiDB.referrals.invited;
-  el.innerHTML = `
-    <div class="sub">${currentAppRole==='buyer' ? 'Know another buyer who\'d rather stop chasing suppliers over Viber?' : 'Bring your own customers onto Nifti — same free, no-friction invite you got.'} Every signup through your link earns you a month free.</div>
-    <div style="display:flex;gap:8px;align-items:center;margin:12px 0;flex-wrap:wrap;">
-      <input type="text" readonly value="${link}" style="flex:1;min-width:220px;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:var(--font-m);font-size:14px;background:var(--bg);">
-      <button class="btn btn-outline" style="padding:9px 16px;font-size:14px;" onclick="copyReferralLink()">📋 Copy link</button>
-    </div>
-    <div style="font-size:13px;color:var(--ink);opacity:.6;margin-bottom:6px;">${invited.length} signup${invited.length===1?'':'s'} so far</div>
-    ${invited.length ? `<table style="width:100%;margin-bottom:10px;"><thead><tr><th>Business</th><th>Joined</th><th>Reward</th></tr></thead>
-      <tbody>${[...invited].reverse().map(r=>`<tr><td>${r.name}</td><td>${r.joinedDate}</td><td>1 month free</td></tr>`).join('')}</tbody></table>` : ''}
-    <span class="row-action" onclick="simulateReferralSignup()">Simulate: someone joins via your link →</span>
-  `;
-}
 
 /* ============================================================================
    STEP 18: analytics instrumentation
@@ -20555,113 +21255,7 @@ function pushNotification(text, color, action, eventType, pushText){
   simulateExternalPush(eventType, pushText || text);
   scheduleNiftiSave();
 }
-function simulateExternalPush(eventType, text){
-  if(!eventType) return; // some in-app events (e.g. a UI-only state change) never leave the app
-  const category = PUSH_EVENT_CATEGORY[eventType];
-  if(category && notificationSettings[category] === false) return; // respects the real per-category toggle
-  // Every channel that's turned on gets its own real delivery attempt — not just whichever one
-  // used to be picked as "the" channel. A channel with no contact details on file (SMS/email
-  // with nothing saved) still logs, but flagged as undeliverable rather than silently pretending
-  // it went out.
-  const activeChannels = Object.entries(notificationSettings.channels).filter(([k,v])=>v).map(([k])=>k);
-  const channelsToLog = activeChannels.length ? activeChannels : ['viber'];
-  channelsToLog.forEach(channel => {
-    const undeliverable = (channel==='sms' && !notificationSettings.smsNumber) || (channel==='email' && !notificationSettings.emailAddress);
-    NiftiDB.pushLog.unshift({id:'push_'+NiftiDB.pushLog.length+'_'+Date.now()+'_'+channel, timestamp:new Date().toISOString(), date:APP_TODAY, channel, eventType, text, read:false, undeliverable});
-  });
-  if(NiftiDB.pushLog.length > LOG_CAPS.pushLog) NiftiDB.pushLog.length = LOG_CAPS.pushLog;
-  if(typeof trackEvent === 'function') trackEvent('push_notification_sent', {eventType, channels: channelsToLog});
-  updatePushLogBadge();
-}
-function updatePushLogBadge(){
-  const badge = document.getElementById('pushLogBadge');
-  if(!badge) return;
-  const unread = NiftiDB.pushLog.filter(p=>!p.read).length;
-  badge.textContent = unread;
-  badge.classList.toggle('hidden', unread===0);
-}
 const CHANNEL_LABELS = {viber:'Viber', sms:'SMS', whatsapp:'WhatsApp', email:'Email'};
-function renderPushLogPanel(){
-  const el = document.getElementById('pushLogContent');
-  if(!el) return;
-  NiftiDB.pushLog.forEach(p=>p.read=true);
-  updatePushLogBadge();
-  el.innerHTML = `
-    <p style="font-size:14.5px;color:var(--ink);opacity:.75;margin-bottom:14px;">Exactly what would have been sent to your phone, for each channel you have turned on — this prototype has no real Viber/SMS/email integration to actually deliver it, so it's logged here instead.</p>
-    ${NiftiDB.pushLog.length ? NiftiDB.pushLog.map(p => `
-      <div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);align-items:flex-start;">
-        <div style="flex-shrink:0;width:64px;height:64px;border-radius:14px;background:${p.undeliverable?'var(--danger)':'#1b1f23'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;text-align:center;">${CHANNEL_LABELS[p.channel]}</div>
-        <div style="flex:1;">
-          <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:10px 14px;font-size:15px;color:var(--ink);">${p.text}</div>
-          <div style="font-size:12.5px;color:${p.undeliverable?'var(--danger)':'var(--ink)'};opacity:${p.undeliverable?'1':'.55'};margin-top:4px;font-weight:${p.undeliverable?'700':'400'};">${p.date}${p.undeliverable ? ' · No '+(p.channel==='sms'?'number':'address')+' on file — add one in Notifications above' : ''}</div>
-        </div>
-      </div>`).join('') : '<p style="font-size:15px;color:var(--ink);opacity:.7;">Nothing yet — this fills up as real events happen (an order sent, a payment received, a new Discover lead).</p>'}
-  `;
-}
-function toggleNotificationChannel(channel){
-  notificationSettings.channels[channel] = !notificationSettings.channels[channel];
-  scheduleNiftiSave();
-  renderNotificationSettingsPanel();
-}
-function saveNotificationContactDetail(field){
-  const input = document.getElementById('notif_'+field);
-  if(!input) return;
-  notificationSettings[field] = input.value.trim();
-  scheduleNiftiSave();
-  renderNotificationChannelSummary();
-}
-function toggleNotificationCategory(category){
-  notificationSettings[category] = !notificationSettings[category];
-  scheduleNiftiSave();
-  renderNotificationSettingsPanel();
-}
-function renderNotificationChannelSummary(){
-  const el = document.getElementById('notifChannelSummary');
-  if(!el) return;
-  const active = Object.entries(notificationSettings.channels).filter(([k,v])=>v).map(([k])=>CHANNEL_LABELS[k]);
-  el.textContent = active.length ? 'Sending to: '+active.join(', ') : 'No channels selected — you won\'t receive any push notifications.';
-  el.style.color = active.length ? 'var(--green)' : 'var(--danger)';
-}
-function renderNotificationSettingsPanel(){
-  const el = document.getElementById('notifSettingsContent');
-  if(!el) return;
-  const s = notificationSettings;
-  const categories = [
-    {key:'orderUpdates', label:'Order updates', example:PUSH_TEMPLATES.orderConfirmed({supplierName:'Metro Steel Co.', poNumber:'PO-2026-0842'})},
-    {key:'priceChanges', label:'Price agreements', example:PUSH_TEMPLATES.priceAccepted({withName:'Dela Cruz Hardware', product:'Steel Rebar 12mm', price:65, unit:'piece'})},
-    {key:'leadAlerts', label:'New leads (Discover)', example:PUSH_TEMPLATES.newLead({buyerName:'Bayview Construction Co.', category:'General hardware'})},
-  ];
-  const smsOn = s.channels.sms, emailOn = s.channels.email;
-  el.innerHTML = `
-    <div style="margin-bottom:16px;">
-      <div style="font-weight:800;font-size:14px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px;">Send to — pick as many as you want</div>
-      <div style="font-size:13px;color:var(--ink);opacity:.65;margin-bottom:8px;">Not just one channel — every one you turn on here gets every notification below.</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
-        ${Object.entries(CHANNEL_LABELS).map(([k,label])=>`<button class="btn ${s.channels[k]?'btn-primary':'btn-outline'}" style="padding:8px 16px;font-size:14px;position:relative;" onclick="toggleNotificationChannel('${k}')">${s.channels[k]?'✓ ':''}${label}</button>`).join('')}
-      </div>
-      <div id="notifChannelSummary" style="font-size:13px;font-weight:700;margin-bottom:12px;"></div>
-      ${smsOn ? `<div style="margin-bottom:10px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
-        <label style="font-size:14px;font-weight:700;display:block;margin-bottom:4px;">SMS number</label>
-        <input type="tel" id="notif_smsNumber" value="${s.smsNumber}" placeholder="e.g. 09171234567" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-family:var(--font-b);font-size:15px;box-sizing:border-box;margin-bottom:6px;" onblur="saveNotificationContactDetail('smsNumber')">
-        ${!s.smsNumber ? `<div style="font-size:12.5px;color:var(--danger);">SMS is on, but no number is saved yet — add one or nothing will actually send.</div>` : ''}
-      </div>` : ''}
-      ${emailOn ? `<div style="margin-bottom:10px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
-        <label style="font-size:14px;font-weight:700;display:block;margin-bottom:4px;">Email address</label>
-        <input type="email" id="notif_emailAddress" value="${s.emailAddress}" placeholder="e.g. you@business.ph" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-family:var(--font-b);font-size:15px;box-sizing:border-box;margin-bottom:6px;" onblur="saveNotificationContactDetail('emailAddress')">
-        ${!s.emailAddress ? `<div style="font-size:12.5px;color:var(--danger);">Email is on, but no address is saved yet — add one or nothing will actually send.</div>` : ''}
-      </div>` : ''}
-    </div>
-    ${categories.map(c => `
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:14px;">
-        <div style="flex:1;">
-          <div style="font-weight:700;font-size:15px;">${c.label}</div>
-          <div style="font-size:13px;color:var(--ink);opacity:.6;margin-top:2px;">e.g. "${c.example}"</div>
-        </div>
-        <div class="switch ${s[c.key]!==false?'on':''}" onclick="toggleNotificationCategory('${c.key}')"><div class="knob"></div></div>
-      </div>`).join('')}
-  `;
-  renderNotificationChannelSummary();
-}
 
 /* ============================================================================
    FEATURE: Real discovery + lead generation
@@ -20688,6 +21282,7 @@ function renderNotificationSettingsPanel(){
 NiftiDB.discoveryLeads = []; // persisted — see collectNiftiPersistableState/applyNiftiPersistedState
 let myBuyerProfilePublic = false; // buyer-side mirror of the supplier's existing myCatalogPublic
 function toggleMyBuyerProfilePublic(){
+  if(myBusiness) return toggleRealPublic().then(() => document.querySelectorAll('.buyerPublicToggle').forEach(t => t.classList.toggle('on', !!myBusiness.catalog_public)));
   myBuyerProfilePublic = !myBuyerProfilePublic;
   document.querySelectorAll('.buyerPublicToggle').forEach(s=>s.classList.toggle('on', myBuyerProfilePublic));
   renderDiscoveryLeadsPanel();
@@ -20723,6 +21318,7 @@ function createConversationForNewConnection(id, name, intoRole){
   if(intoRole==='supplier') supplierConversations.push(conv); else buyerConversations.push(conv);
 }
 function acceptDiscoveryLead(id){
+  if(myBusiness) return respondRealConnection(id, true);
   const lead = NiftiDB.discoveryLeads.find(l=>l.id===id);
   if(!lead || lead.status!=='new') return;
   // Discover's whole prospect pool (buyerProfiles/supplierProfiles) is fixed demo data — there's
@@ -20730,7 +21326,6 @@ function acceptDiscoveryLead(id){
   // permanent-looking connection + conversation for a real account with no real counterpart
   // behind it: messages sent through it silently never left this browser (sendRealMessage no-ops
   // without a real conversationRowId), yet the UI called it "a real connection."
-  if(myBusiness){ showToast("Discover connections aren't available yet for live accounts — invite this business directly from My Suppliers/My Buyers instead.", 'error'); return; }
   lead.status = 'accepted';
   const newId = 'disc_'+Date.now();
   lead.acceptedId = newId;
@@ -20745,6 +21340,7 @@ function acceptDiscoveryLead(id){
   showToast(`${lead.counterpartName} is now a real connection — find them in ${lead.forRole==='supplier'?'My Buyers':'My Suppliers'}, or message them right away.`, 'success');
 }
 function declineDiscoveryLead(id){
+  if(myBusiness) return respondRealConnection(id, false);
   const lead = NiftiDB.discoveryLeads.find(l=>l.id===id);
   if(!lead) return;
   lead.status = 'declined';
@@ -20752,6 +21348,7 @@ function declineDiscoveryLead(id){
   scheduleNiftiSave();
 }
 function renderDiscoveryLeadsPanel(){
+  if(myBusiness) return renderRealRequestsPanel();
   const el = document.getElementById('discoveryLeadsContent');
   if(!el) return;
   const mine = NiftiDB.discoveryLeads.filter(l=>l.direction==='inbound' && l.forRole===currentAppRole);
@@ -20776,6 +21373,7 @@ function renderDiscoveryLeadsPanel(){
 // Outbound: sending a request now creates a trackable event; the simulated response actually
 // creates the connection record, rather than just relabeling the button.
 function sendDiscoveryRequest(idx, mode){
+  if(myBusiness) return sendRealConnectionRequest(idx, mode);
   const p = window._discListRef[idx];
   trackEvent('discovery_request_sent', {category:p.cat, mode});
   const actionEl = document.getElementById('discAction_'+idx);
@@ -20786,11 +21384,11 @@ function sendDiscoveryRequest(idx, mode){
   `;
 }
 function acceptOutboundDiscovery(idx, mode){
+  if(myBusiness) return;
   const p = window._discListRef[idx];
   // Same reasoning as acceptDiscoveryLead — this whole flow browses a fixed demo prospect pool,
   // not real Nifti businesses, so "accepting" here has never had a real counterpart for a real
   // account to actually connect to.
-  if(myBusiness){ showToast("Discover connections aren't available yet for live accounts — invite this business directly from My Suppliers/My Buyers instead.", 'error'); return; }
   const newId = 'disc_'+Date.now();
   const record = {id:newId, name:p.n, category:p.cat, orders:0, lastOrder:'Never', since:APP_TODAY, preferredContact:'In-app chat', paymentTerms:'Not yet set'};
   if(mode==='suppliers') suppliersData.push(record); else buyersData.push(record);
@@ -21862,31 +22460,6 @@ function urlBase64ToUint8Array(base64String){
 // The real subscribe flow: ask the browser's push service for a subscription (this is what
 // makes delivery possible even when this tab is fully closed), then hand that subscription to
 // push-subscribe, which saves it against the signed-in account's own business_id.
-async function subscribeToRealPush(){
-  if(!myBusiness){
-    showToast('Notifications are on for this tab. Sign in to also get them when the app is fully closed.', 'success');
-    return;
-  }
-  if(!('serviceWorker' in navigator) || !('PushManager' in window)){
-    showToast('This browser doesn\'t support background push.', 'error');
-    return;
-  }
-  try{
-    const registration = await navigator.serviceWorker.ready;
-    let subscription = await registration.pushManager.getSubscription();
-    if(!subscription){
-      subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(NIFTI_VAPID_PUBLIC_KEY),
-      });
-    }
-    const { data, error } = await sb.functions.invoke('push-subscribe', { body: { subscription: subscription.toJSON() } });
-    if(!error && data && data.ok){ showToast('Real background push is on — you\'ll get notified even with the app fully closed.', 'success'); }
-    else { showToast('Could not save your subscription — try again.', 'error'); }
-  } catch(err){
-    showToast('Could not set up background push: ' + err.message, 'error');
-  }
-}
 // Wraps Notification.requestPermission() so it works whether the browser implements the modern
 // Promise-returning form or the older callback-based form (some browser/PWA contexts still use
 // the old signature) — calling .then() directly on the older form throws, which is exactly the
@@ -21908,11 +22481,11 @@ function maybeAutoRequestNotifications(){
   if(_autoNotifRequested) return;
   _autoNotifRequested = true;
   if(!('Notification' in window)) return;
-  if(Notification.permission === 'granted'){ chatNotificationsEnabled = true; subscribeToRealPush(); return; }
+  if(Notification.permission === 'granted'){ chatNotificationsEnabled = true; subscribeToRealPush(true); return; }
   if(Notification.permission === 'denied') return; // respect a previous no — don't ask again this session
   requestNotificationPermissionSafe().then(perm => {
     chatNotificationsEnabled = (perm === 'granted');
-    if(perm === 'granted') subscribeToRealPush();
+    if(perm === 'granted') subscribeToRealPush(false);
   });
 }
 function fireRealChatNotification(senderName, text){
@@ -21923,18 +22496,15 @@ function fireRealChatNotification(senderName, text){
   pushNotification(`New message from ${senderName}`, 'var(--green)', {type:'page', page:'messages'}, 'chatMessage', PUSH_TEMPLATES.chatMessage({senderName, text}));
   // myBusiness.id is the real recipient's business_id -- push-send needs a real uuid, which
   // only exists for a signed-in account, not the demo's ME_BUYER/ME_SUPPLIER placeholder strings.
-  if(myBusiness) triggerRealServerPush(myBusiness.id, `New message from ${senderName}`, text);
 }
 // Calls the real push-send Edge Function -- the actual mechanism that reaches a fully closed
 // app. Note this only ever fires today from simulateThreadReply() below, the demo's "they
 // reply" button: real two-way chat isn't wired to Supabase yet (a separate, larger piece of
 // work), so there's no real message event to trigger this from in production yet either. The
 // send path itself is real and complete; it just has nothing real feeding it until that lands.
-async function triggerRealServerPush(businessId, title, body){
-  try{
-    await sb.functions.invoke('push-send', { body: { businessId, title, body } });
-  } catch(e){ /* push-send unreachable or not yet configured — the in-app notification already fired regardless */ }
-}
+// Retired: the database queues notifications itself (notification_outbox) and push-dispatch
+// delivers them, so nothing on the client pushes to anyone.
+async function triggerRealServerPush(){}
 // Same honest "simulate" pattern used elsewhere in this build (the SMS-confirm simulation, the
 // referral-signup simulation) — there's no other real person on the far end of this
 // single-persona prototype to actually reply, so this stands in for that, clearly labeled.
@@ -22372,6 +22942,12 @@ async function bootNifti(){
   // An order link opens only that order (no app shell, no sign-in needed).
   if(await handleIncomingLink()) return;
   initBottomNav();
+  // Tapping a notification opens the screen it's about (#messages, #orders, #team).
+  const openFromHash = () => { const h = (location.hash||'').replace('#',''); if(['messages','orders','team'].includes(h)){ history.replaceState(null,'',location.pathname+location.search); return h; } return null; };
+  if('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => {
+    if(e.data && e.data.type === 'nifti-open'){ const h = new URL(e.data.url).hash.replace('#',''); if(['messages','orders','team'].includes(h)) navigate(h); }
+  });
+  window._niftiOpenPage = openFromHash();
   const { data: { session } } = await sb.auth.getSession();
   let signedIn = false;
   if(session) signedIn = await loadMyBusinessContext();
@@ -22392,6 +22968,10 @@ async function bootNifti(){
     subscribeToTeamAndRoles();
     await loadTeamWork();
     subscribeToTeamWork();
+    applyServerCatalog();
+    renderPausedBanner();
+    maybeFinishBusinessSetup();
+    if('Notification' in window && Notification.permission === 'granted') subscribeToRealPush(true);
     await loadRealInventory();
     subscribeToInventory();
     await loadRealSupply();
@@ -22403,9 +22983,10 @@ async function bootNifti(){
     subscribeToPriceAgreements();
     retryPendingPriceAgreements(); // picks up anything still unsynced from before this reload if we're already back online
     applyRealAccountUI();
-    navigate('dashboard');
+    navigate(window._niftiOpenPage || 'dashboard');
   }
 }
+renderGoogleSignInButtons();
 bootNifti();
 </script>
 </body>
