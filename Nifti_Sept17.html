@@ -757,6 +757,10 @@
   .paste-price{width:92px;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;}
   .paste-hint{font-size:12.5px;opacity:.75;margin-top:3px;}
 
+  .ios-steps{margin-top:8px;display:flex;flex-direction:column;gap:8px;}
+  .ios-step{display:flex;gap:10px;align-items:flex-start;font-size:15px;line-height:1.4;}
+  .ios-num{flex:0 0 26px;height:26px;border-radius:50%;background:var(--green);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:14px;}
+  .ios-share{display:inline-block;border:1.5px solid currentColor;border-radius:5px;padding:0 5px;font-size:13px;}
   .notif-phone{font-size:14.5px;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--border);}
   .notif-phone.on{background:var(--green-soft);border-color:var(--green);color:var(--green);font-weight:700;}
   .notif-phone.warn{background:var(--lowstock-soft);border-color:var(--lowstock-fill);}
@@ -6170,6 +6174,7 @@ const NOTIF_CATEGORIES = [
   {key:'order_updates', local:'orderUpdates', label:'Orders and payments', example:'✅ Metro Steel Co. confirmed PO-2026-0842'},
   {key:'new_messages', local:'newMessages', label:'Messages', example:'Metro Steel Co.: "Truck leaves at 7am"'},
   {key:'lead_alerts', local:'leadAlerts', label:'Connection requests', example:'Bayview Construction wants to connect'},
+  {key:'daily_summary', local:'dailySummary', label:'Morning summary at 7am', example:'☀️ Today: 2 to confirm · ₱45,000 owed to you'},
 ];
 let serverNotifPrefs = null;
 let emailNotifAvailable = false;
@@ -6215,6 +6220,7 @@ async function renderNotificationSettingsPanel(){
       try{ const reg = await navigator.serviceWorker.getRegistration(); const sub = reg && await reg.pushManager.getSubscription(); if(sub) phoneState = 'on'; }catch(e){}
     }
   }
+  if(phoneState !== 'on' && iosNeedsInstall()) phoneState = 'ios';
   const isOn = key => { const c = NOTIF_CATEGORIES.find(x => x.key === key); return myBusiness ? !(serverNotifPrefs && serverNotifPrefs[key] === false) : notificationSettings[c.local] !== false; };
   const phoneBlock = {
     on: `<div class="notif-phone on">✓ On for this phone. You'll get notified even when Nifti is closed.</div>
@@ -6222,7 +6228,8 @@ async function renderNotificationSettingsPanel(){
     off: `<div class="notif-phone">Get a buzz on this phone when a supplier or buyer messages you, an order changes, or a payment comes in, like Viber.</div>
           <button class="btn btn-primary" style="margin-top:8px;" onclick="turnOnPhoneNotifications()">🔔 Turn on notifications</button>`,
     blocked: `<div class="notif-phone warn">Notifications are blocked for this site. Open your browser's site settings, allow notifications for Nifti, then come back here.</div>`,
-    unsupported: `<div class="notif-phone warn">This browser can't show notifications when Nifti is closed. On iPhone, open Nifti in Safari, tap Share → Add to Home Screen, then open it from your Home Screen.</div>`,
+    unsupported: `<div class="notif-phone warn">This browser can't show notifications when Nifti is closed. Try Chrome or Safari${emailNotifAvailable ? ', or turn on email alerts below' : ''}.</div>`,
+    ios: `<div class="notif-phone">On iPhone, notifications work once Nifti is on your Home Screen:</div>${iosInstallStepsHtml()}`,
   }[phoneState];
   const email = myBusiness && emailNotifAvailable ? `<div style="margin-top:16px;">
       <label style="display:flex;gap:8px;align-items:center;font-weight:700;"><input type="checkbox" id="notifEmailOn" ${serverNotifPrefs && serverNotifPrefs.channel_email ? 'checked' : ''}> Also email me</label>
@@ -6369,7 +6376,7 @@ async function savePublicProfile(){
   showToast('Saved. This is what businesses see in Discover.', 'success');
 }
 // A supplier's catalog now lives on the server (same on every device; the public part is what
-// Discover shows). Photos stay on the device for now to keep the stored catalog small.
+// Discover shows).
 let catalogSyncTimer = null;
 function scheduleCatalogServerSync(){
   if(!myBusiness || myBusiness.type !== 'supplier') return;
@@ -6387,8 +6394,7 @@ function applyServerCatalog(){
   myCatalogPublic = !!myBusiness.catalog_public;
   myBuyerProfilePublic = !!myBusiness.catalog_public;
   if(myBusiness.type !== 'supplier' || !Array.isArray(myBusiness.catalog) || !myBusiness.catalog.length) return;
-  const photos = new Map(myCatalog.filter(c => c.photo).map(c => [String(c.product).toLowerCase(), c.photo]));
-  myCatalog = myBusiness.catalog.map(c => Object.assign({}, c, photos.has(String(c.product).toLowerCase()) ? {photo: photos.get(String(c.product).toLowerCase())} : {}));
+  myCatalog = myBusiness.catalog.map(c => Object.assign({}, c));
 }
 
 /* ============ REAL VERSIONS OF THE LAST "PRETEND" FEATURES ============
@@ -6887,6 +6893,77 @@ async function submitFinishBusinessSetup(){
   location.reload();
 }
 
+/* ============ iPHONE NOTIFICATIONS ============
+   Apple only allows web notifications for sites added to the Home Screen (iOS 16.4+). A Safari
+   tab can never receive them, so instead of failing silently this walks iPhone users through the
+   one-time Add to Home Screen step, then asks for permission inside the installed app (where
+   the permission prompt is allowed). Email is offered as the no-install alternative when it's
+   switched on. */
+function isIOSDevice(){
+  const ua = navigator.userAgent || '';
+  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+function isInstalledApp(){
+  return window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+}
+function iosNeedsInstall(){ return isIOSDevice() && !isInstalledApp(); }
+function iosVersion(){
+  const m = (navigator.userAgent || '').match(/OS (\d+)_(\d+)/);
+  return m ? Number(m[1]) + Number(m[2]) / 100 : null;
+}
+function iosInstallStepsHtml(){
+  const v = iosVersion();
+  const tooOld = v !== null && v < 16.4;
+  if(tooOld) return `<div class="notif-phone warn">This iPhone's software is too old for app notifications (needs iOS 16.4 or newer). Update in Settings → General → Software Update${emailNotifAvailable ? ', or turn on email alerts below' : ''}.</div>`;
+  return `<div class="ios-steps">
+    <div class="ios-step"><span class="ios-num">1</span><div>Tap the <strong>Share</strong> button <span class="ios-share" aria-hidden="true">⬆︎</span> at the bottom of Safari (or the top right in Chrome).</div></div>
+    <div class="ios-step"><span class="ios-num">2</span><div>Scroll down and tap <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</div></div>
+    <div class="ios-step"><span class="ios-num">3</span><div>Open <strong>Nifti</strong> from your Home Screen, sign in once, and tap <strong>Turn on notifications</strong>.</div></div>
+  </div>
+  <div style="font-size:13px;opacity:.7;margin-top:6px;">Takes 20 seconds, only once. Apple only sends web notifications to apps on the Home Screen.</div>`;
+}
+function openIosInstallGuide(){
+  if(document.getElementById('iosGuideModal')) return;
+  const m = document.createElement('div');
+  m.className = 'share-modal-backdrop'; m.id = 'iosGuideModal';
+  m.onclick = e => { if(e.target === m) m.remove(); };
+  m.innerHTML = `<div class="share-modal">
+    <div style="font-size:19px;font-weight:800;margin-bottom:8px;">📲 Get order alerts on your iPhone</div>
+    ${iosInstallStepsHtml()}
+    <button class="btn btn-outline" style="margin-top:14px;width:100%;" onclick="document.getElementById('iosGuideModal').remove()">Got it</button>
+  </div>`;
+  document.body.appendChild(m);
+}
+function dismissPhoneNudge(){
+  try{ localStorage.setItem('nifti-phone-nudge-dismissed', String(Date.now())); }catch(e){}
+  const b = document.getElementById('phoneNotifNudge'); if(b) b.remove();
+}
+// A small card at the top of Home: on iPhone Safari → "add to Home Screen";
+// inside the installed app (any phone) with notifications never asked → "turn on".
+function renderPhoneNotifNudge(){
+  const old = document.getElementById('phoneNotifNudge'); if(old) old.remove();
+  if(!myBusiness) return;
+  try{ const d = Number(localStorage.getItem('nifti-phone-nudge-dismissed') || 0); if(Date.now() - d < 14 * 86400000) return; }catch(e){}
+  let html = '';
+  if(iosNeedsInstall()){
+    html = `<div style="flex:1;min-width:200px;"><div style="font-weight:800;">📲 Get order alerts on this iPhone</div><div style="font-size:14px;opacity:.8;">Add Nifti to your Home Screen so new orders, messages and payments buzz your phone.</div></div>
+      <button class="btn btn-primary" style="padding:8px 14px;" onclick="openIosInstallGuide()">Show me how</button>`;
+  } else if('Notification' in window && 'PushManager' in window && Notification.permission === 'default'){
+    html = `<div style="flex:1;min-width:200px;"><div style="font-weight:800;">🔔 Don't miss an order</div><div style="font-size:14px;opacity:.8;">Get a buzz when a supplier or buyer messages you, an order changes, or a payment comes in.</div></div>
+      <button class="btn btn-primary" style="padding:8px 14px;" onclick="turnOnPhoneNotifications().then(renderPhoneNotifNudge)">Turn on</button>`;
+  }
+  if(!html) return;
+  const host = document.getElementById(currentAppRole === 'supplier' ? 'supplierDashboardView' : 'buyerDashboardView');
+  const head = host && host.querySelector('.page-head');
+  if(!head) return;
+  const card = document.createElement('div');
+  card.id = 'phoneNotifNudge';
+  card.className = 'panel-card';
+  card.style.cssText = 'margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;';
+  card.innerHTML = html + `<span class="row-action" style="font-size:13px;opacity:.7;" onclick="dismissPhoneNudge()">Not now</span>`;
+  head.after(card);
+}
+
 function renderSidebarForViewAsRole(){
   const allowed = computeAllowedPages(getEffectiveRoles());
   document.querySelectorAll('.nav-item[data-page], .bnav-item[data-page], .more-sheet-item[data-page]').forEach(el => {
@@ -6995,6 +7072,7 @@ function navigate(page){
       if(document.getElementById('supplierTodayPanel')) document.getElementById('supplierTodayPanel').innerHTML = renderTodayPanel('supplier');
       renderPriceProtectionCard();
       renderHomeInviteNudge();
+      renderPhoneNotifNudge();
       if(currentAppRole === 'supplier') renderWhoOwesMe(); else renderBillsToPay();
     }
     if(page==='messages' && !window._msgInit){
@@ -8089,9 +8167,7 @@ function renderSupplierInventoryDashboard(){
       <div id="myCatalogList"></div>
       <div style="margin-top:14px;">
         <button class="btn btn-outline" style="padding:8px 16px;font-size:15px;" onclick="toggleMyCatalogAddForm()">+ Add a Product</button>
-        <button class="btn btn-outline hidden" id="myCatalogMassUploadBtn" style="padding:8px 16px;font-size:15px;" onclick="openMassPhotoUpload()">📸 Upload Photos for Multiple Products</button>
       </div>
-      <div id="massPhotoUploadPanel"></div>
       <div id="myCatalogAddForm" class="hidden" style="margin-top:12px;padding:16px;background:var(--bg);border:1.5px solid var(--border);border-radius:12px;">
         <div style="font-weight:800;font-size:15.5px;color:var(--ink);margin-bottom:10px;">Add a new product</div>
         <div class="expand-grid" style="grid-template-columns:2fr 1fr 1fr 1fr;align-items:end;">
@@ -16364,51 +16440,12 @@ function renderMyCatalogPanel(){
   const panel = document.getElementById('myCatalogPanel');
   if(!panel) return; // supplier hasn't opened Inventory yet — nothing to refresh
   document.getElementById('myCatalogPublicSwitch').classList.toggle('on', myCatalogPublic);
-  const massUploadBtn = document.getElementById('myCatalogMassUploadBtn');
-  if(massUploadBtn) massUploadBtn.classList.toggle('hidden', !myCatalog.length);
-  document.getElementById('myCatalogList').innerHTML = myCatalog.length ? `<table style="width:100%;font-size:15px;margin-bottom:6px;"><thead><tr><th>Photo</th><th>Product</th><th>Price</th><th>Min. order</th><th></th></tr></thead><tbody>
+  document.getElementById('myCatalogList').innerHTML = myCatalog.length ? `<table style="width:100%;font-size:15px;margin-bottom:6px;"><thead><tr><th>Product</th><th>Price</th><th>Min. order</th><th></th></tr></thead><tbody>
     ${myCatalog.map((c,i)=>`<tr>
-      <td>${c.photo ? `<img src="${c.photo}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--border);">` : `<span class="row-action" style="font-size:13px;" onclick="openCatalogPhotoUpload(${i})">+ Add</span>`}</td>
-      <td>${c.product}</td><td>${fmtPHP(c.price)}/${c.unit}</td><td>${c.moq} ${c.unit}s</td>
-      <td><span class="row-action" onclick="openEditMyCatalogItemForm(${i})">Edit</span> · ${c.photo ? `<span class="row-action" onclick="openCatalogPhotoUpload(${i})">Change photo</span> · ` : ''}<span class="row-action" style="color:var(--danger);" onclick="removeMyCatalogItem(${i})">Remove</span></td>
-    </tr><tr id="myCatalogEditForm_${i}"></tr><tr id="catalogPhotoUpload_${i}"></tr><tr><td colspan="5" style="padding:0;"><div id="deleteMyCatalogConfirm_${i}"></div></td></tr>`).join('')}
+      <td>${escapeHtml(c.product)}</td><td>${fmtPHP(c.price)}/${escapeHtml(c.unit)}</td><td>${escapeHtml(c.moq)} ${escapeHtml(c.unit)}s</td>
+      <td><span class="row-action" onclick="openEditMyCatalogItemForm(${i})">Edit</span> · <span class="row-action" style="color:var(--danger);" onclick="removeMyCatalogItem(${i})">Remove</span></td>
+    </tr><tr id="myCatalogEditForm_${i}"></tr><tr><td colspan="4" style="padding:0;"><div id="deleteMyCatalogConfirm_${i}"></div></td></tr>`).join('')}
   </tbody></table>` : `<div style="font-size:15px;color:var(--ink);padding:8px 0;">No products listed yet.</div>`;
-}
-// ---- Product photos: real quality checks, not just a file picker ----
-// A grainy or hazy photo is worse than no photo at all for a buyer deciding whether to trust a
-// listing. This actually measures sharpness and resolution before accepting anything, rather
-// than accepting whatever gets dropped in and hoping for the best.
-function analyzePhotoQuality(img){
-  const issues = [];
-  if(img.width < 400 || img.height < 400) issues.push('low_resolution');
-  // Sharpness check is wrapped defensively — a few privacy-hardened browsers restrict canvas
-  // pixel readback entirely. If that happens, the resolution check above still applies; this
-  // one is simply skipped rather than blocking the upload outright.
-  try{
-    const size = 100;
-    const canvas = document.createElement('canvas');
-    canvas.width = size; canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0, size, size);
-    const data = ctx.getImageData(0,0,size,size).data;
-    // A simple, real sharpness proxy: average brightness difference between neighboring pixels.
-    // A crisp in-focus photo has lots of sharp edges (high average difference); a blurry or hazy
-    // one is smoothed out (low average difference) — this is what that measures.
-    let sumGrad = 0, count = 0;
-    for(let y=0;y<size-1;y++){
-      for(let x=0;x<size-1;x++){
-        const i=(y*size+x)*4, iR=(y*size+x+1)*4, iD=((y+1)*size+x)*4;
-        const gray=(data[i]+data[i+1]+data[i+2])/3, grayR=(data[iR]+data[iR+1]+data[iR+2])/3, grayD=(data[iD]+data[iD+1]+data[iD+2])/3;
-        sumGrad += Math.abs(gray-grayR)+Math.abs(gray-grayD);
-        count++;
-      }
-    }
-    const sharpness = sumGrad/count;
-    if(sharpness < 8) issues.push('blurry');
-    return {issues, sharpness, width:img.width, height:img.height};
-  }catch(e){
-    return {issues, sharpness:null, width:img.width, height:img.height};
-  }
 }
 function loadImageForQualityCheck(file, callback){
   const reader = new FileReader();
@@ -16420,52 +16457,6 @@ function loadImageForQualityCheck(file, callback){
   };
   reader.readAsDataURL(file);
 }
-function renderPhotoQualityBadge(quality){
-  if(!quality || !quality.issues.length){
-    return `<div style="font-size:13px;color:var(--green);font-weight:700;margin-top:4px;">✓ Looks sharp and clear (${quality?quality.width:'?'}×${quality?quality.height:'?'})</div>`;
-  }
-  const labels = {low_resolution:'Resolution is low — it may look pixelated once buyers zoom in.', blurry:'This looks blurry or hazy — consider retaking it in better light, held steady.'};
-  return `<div style="font-size:13px;color:var(--danger);font-weight:700;margin-top:4px;">${quality.issues.map(i=>'⚠ '+labels[i]).join('<br>')}</div>`;
-}
-function openCatalogPhotoUpload(i){
-  const el = document.getElementById('catalogPhotoUpload_'+i);
-  if(!el) return;
-  if(el.innerHTML.trim()!==''){ el.innerHTML=''; return; }
-  el.innerHTML = `<td colspan="5" style="padding:10px 0;">
-    <input type="file" id="catalogPhotoInput_${i}" accept="image/*" onchange="handleCatalogPhotoSelect(${i})">
-    <div id="catalogPhotoPreview_${i}"></div>
-  </td>`;
-}
-function handleCatalogPhotoSelect(i){
-  const input = document.getElementById('catalogPhotoInput_'+i);
-  const file = input.files[0];
-  if(!file) return;
-  const previewEl = document.getElementById('catalogPhotoPreview_'+i);
-  previewEl.innerHTML = `<div style="font-size:13px;color:var(--ink);opacity:.6;margin-top:4px;">Checking photo quality…</div>`;
-  loadImageForQualityCheck(file, (img, rawDataUrl) => {
-    if(!img){ previewEl.innerHTML = `<div style="font-size:13px;color:var(--danger);margin-top:4px;">Couldn't read that file as an image.</div>`; return; }
-    const quality = analyzePhotoQuality(img);
-    readImageFileCompressed(file, (compressedDataUrl) => {
-      previewEl.innerHTML = `<div style="display:flex;gap:10px;align-items:flex-start;margin-top:6px;">
-        <img src="${compressedDataUrl}" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid var(--border);">
-        <div>
-          ${renderPhotoQualityBadge(quality)}
-          <button class="btn btn-primary" style="padding:6px 12px;font-size:13.5px;margin-top:6px;" onclick="saveCatalogPhoto(${i}, '${compressedDataUrl.replace(/'/g,"\\'")}')">${quality.issues.length ? 'Use anyway' : 'Use this photo'}</button>
-          ${quality.issues.length ? `<span class="row-action" style="font-size:13px;margin-left:8px;" onclick="document.getElementById('catalogPhotoInput_${i}').value=''; document.getElementById('catalogPhotoPreview_${i}').innerHTML='';">Try a different photo</span>` : ''}
-        </div>
-      </div>`;
-    }, 800, 0.8); // product photos can afford to be a bit larger/higher-quality than a delivery snapshot
-  });
-}
-function saveCatalogPhoto(i, dataUrl){
-  const item = myCatalog[i];
-  if(!item) return;
-  item.photo = dataUrl;
-  document.getElementById('catalogPhotoUpload_'+i).innerHTML = '';
-  renderMyCatalogPanel();
-  showToast('Photo added.', 'success');
-  scheduleNiftiSave();
-}
 function toggleMyCatalogPublic(){
   if(!requirePermission('manageCatalog')) return;
   if(myBusiness) return toggleRealPublic().then(renderMyCatalogPanel);
@@ -16474,81 +16465,9 @@ function toggleMyCatalogPublic(){
   if(document.getElementById('discoveryLeadsContent')) renderDiscoveryLeadsPanel();
   scheduleNiftiSave();
 }
-// ---- Mass photo upload — several products at once, still with the same quality check on each ----
-// The point of "mass" here isn't skipping the quality check to go faster; it's not having to
-// click "Add a Product" → open the row → pick a file, one at a time, for every single item.
-let massUploadEntries = [];
-function openMassPhotoUpload(){
-  const el = document.getElementById('massPhotoUploadPanel');
-  if(!el) return;
-  if(el.innerHTML.trim()!==''){ el.innerHTML=''; massUploadEntries=[]; return; }
-  massUploadEntries = [];
-  el.innerHTML = `<div class="panel-card" style="margin-top:14px;">
-    <div style="font-weight:700;font-size:15px;margin-bottom:6px;">Upload photos for multiple products</div>
-    <div style="font-size:13.5px;color:var(--ink);opacity:.7;margin-bottom:10px;">Pick as many photos as you want at once — we'll try to match each one to a product by its filename, and you can fix or set the rest yourself before saving anything.</div>
-    <input type="file" id="massPhotoInput" accept="image/*" multiple onchange="handleMassPhotoSelect()">
-    <div id="massPhotoGrid" style="display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;"></div>
-    <button class="btn btn-primary hidden" id="massPhotoSaveBtn" style="margin-top:12px;" onclick="submitMassPhotoUpload()">Save all photos →</button>
-  </div>`;
-}
-function handleMassPhotoSelect(){
-  const input = document.getElementById('massPhotoInput');
-  const files = Array.from(input.files);
-  if(!files.length) return;
-  massUploadEntries = files.map(f=>({file:f, product:guessProductFromFilename(f.name), photo:null, quality:null, status:'checking'}));
-  renderMassPhotoGrid();
-  massUploadEntries.forEach((entry,idx)=>{
-    loadImageForQualityCheck(entry.file, (img)=>{
-      if(!img){ entry.status='error'; renderMassPhotoGrid(); return; }
-      entry.quality = analyzePhotoQuality(img);
-      readImageFileCompressed(entry.file, (compressedDataUrl)=>{
-        entry.photo = compressedDataUrl;
-        entry.status = 'ready';
-        renderMassPhotoGrid();
-      }, 800, 0.8);
-    });
-  });
-}
 // Simple, honest filename matching — not fuzzy AI matching, just "does the product name (or a
 // close piece of it) appear in the filename" — good enough to save time on well-named photos,
 // and every guess is shown plainly so a wrong one is obviously fixable, not hidden.
-function guessProductFromFilename(filename){
-  const norm = filename.toLowerCase().replace(/[^a-z0-9]/g,'');
-  const match = myCatalog.find(c => norm.includes(c.product.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,6)));
-  return match ? match.product : '';
-}
-function renderMassPhotoGrid(){
-  const el = document.getElementById('massPhotoGrid');
-  if(!el) return;
-  el.innerHTML = massUploadEntries.map((entry,i)=>`
-    <div style="width:150px;">
-      ${entry.photo ? `<img src="${entry.photo}" style="width:150px;height:150px;object-fit:cover;border-radius:8px;border:1px solid var(--border);">` : `<div style="width:150px;height:150px;border-radius:8px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--ink);opacity:.6;">${entry.status==='error'?'Could not read file':'Checking…'}</div>`}
-      <select style="width:100%;margin-top:6px;padding:5px;border:1px solid var(--border);border-radius:6px;font-size:13.5px;" onchange="setMassPhotoProduct(${i}, this.value)">
-        <option value="">— Assign to product —</option>
-        ${myCatalog.map(c=>`<option value="${c.product}" ${entry.product===c.product?'selected':''}>${c.product}</option>`).join('')}
-      </select>
-      ${entry.quality ? renderPhotoQualityBadge(entry.quality) : ''}
-      <span class="row-action" style="font-size:12.5px;color:var(--danger);" onclick="removeMassPhotoEntry(${i})">Remove</span>
-    </div>
-  `).join('');
-  const saveBtn = document.getElementById('massPhotoSaveBtn');
-  if(saveBtn) saveBtn.classList.toggle('hidden', !massUploadEntries.some(e=>e.photo && e.product));
-}
-function setMassPhotoProduct(i, val){ massUploadEntries[i].product = val; renderMassPhotoGrid(); }
-function removeMassPhotoEntry(i){ massUploadEntries.splice(i,1); renderMassPhotoGrid(); }
-function submitMassPhotoUpload(){
-  let count = 0;
-  massUploadEntries.forEach(entry=>{
-    if(!entry.photo || !entry.product) return;
-    const item = myCatalog.find(c=>c.product===entry.product);
-    if(item){ item.photo = entry.photo; count++; }
-  });
-  massUploadEntries = [];
-  document.getElementById('massPhotoUploadPanel').innerHTML = '';
-  renderMyCatalogPanel();
-  showToast(`${count} photo${count!==1?'s':''} saved.`, 'success');
-  scheduleNiftiSave();
-}
 // Dispatches the Discover page's single visible toggle to whichever real state it actually
 // controls for the current role — buyer visibility and supplier catalog visibility were two
 // separate booleans before this, now driven through one on-screen switch per role. The Discover
@@ -22642,7 +22561,7 @@ function applyNiftiPersistedState(s){
   if(notificationSettings.smsNumber === undefined) notificationSettings.smsNumber = '';
   if(notificationSettings.emailAddress === undefined) notificationSettings.emailAddress = '';
   supplierProductCatalogs = s.supplierProductCatalogs || supplierProductCatalogs;
-  myCatalog = s.myCatalog || myCatalog;
+  myCatalog = (s.myCatalog || myCatalog).map(c => { if(c && c.photo){ const x = Object.assign({}, c); delete x.photo; return x; } return c; });
   myCatalogPublic = (typeof s.myCatalogPublic === 'boolean') ? s.myCatalogPublic : myCatalogPublic;
   taxProfiles = s.taxProfiles || taxProfiles;
   if(Array.isArray(s.myPaymentAccounts)) myPaymentAccounts = s.myPaymentAccounts;
