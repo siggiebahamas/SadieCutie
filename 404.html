@@ -1,10 +1,19 @@
-<!doctype html><html><head><meta charset="utf-8"><title>Nifti</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nifti</title>
+<meta name="theme-color" content="#1B6B40">
 <script>
 // GitHub Pages serves this for any path that doesn't exist yet. A store link shared before its
-// page was built (/s/<name>/) still opens the store; anything else goes to the home page.
+// own page was built (/s/<name>/) still opens the store (lightweight version); anything else goes
+// to the home page.
 (function(){
   var p = location.pathname, m = p.match(/^(.*?)\/s\/([a-z0-9-]{3,40})\/?$/);
-  if(m){ location.replace(m[1] + '/' + location.search + '#s/' + m[2]); return; }
+  if(m){
+    window.NIFTI_STORE_SLUG = m[2];
+    document.addEventListener('DOMContentLoaded', function(){
+      var root = document.createElement('div'); root.id = 'store-root'; document.body.appendChild(root);
+      var s = document.createElement('script'); s.src = m[1] + '/store.js'; document.body.appendChild(s);
+    });
+    return;
+  }
   var base = p.split('/').slice(0, 2).join('/') + '/';
   location.replace(base === '//' ? '/' : base);
 })();

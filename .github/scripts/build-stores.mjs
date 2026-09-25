@@ -1,6 +1,7 @@
 // Builds one small page per live online store (/s/<slug>/) so links shared on Facebook,
 // Messenger and Viber show the store's name, headline and products in the preview (their link
-// readers don't run JavaScript). Each page sends people straight on to the store in the app.
+// readers don't run JavaScript). Each page loads the lightweight store (store.js, a few KB)
+// instead of the full app, so it opens fast on mobile data.
 // Also adds the stores to sitemap.xml so Google can find them. Runs on every deploy and every
 // 2 hours (see deploy-pages.yml). Uses only the public read-only list_public_stores() function.
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
@@ -33,10 +34,13 @@ for (const s of stores) {
 <meta property="og:url" content="${esc(url)}">
 <meta property="og:image" content="${SITE}icon-512.png">
 <meta name="twitter:card" content="summary">
-<script>location.replace('../../' + location.search + '#s/${s.slug}');</script>
-</head><body style="font-family:system-ui,sans-serif;padding:24px;">
-<h1>${esc(s.name)}</h1><p>${esc(s.headline || '')}</p>
-<p><a href="../../#s/${s.slug}">Open the store and order →</a></p>
+<meta name="theme-color" content="#1B6B40">
+<link rel="icon" href="../../icon-512.png">
+<link rel="preconnect" href="https://ctryvcloavfpecbrbzxy.supabase.co">
+</head><body>
+<div id="store-root"><div style="max-width:640px;margin:0 auto;padding:24px 16px;font-family:system-ui,sans-serif;"><h1 style="font-size:21px;">${esc(s.name)}</h1><p>${esc(s.headline || '')}</p><p>Loading the store…</p></div></div>
+<script>window.NIFTI_STORE_SLUG = '${s.slug}';</script>
+<script src="../../store.js" defer></script>
 </body></html>`;
   mkdirSync(`_site/s/${s.slug}`, { recursive: true });
   writeFileSync(`_site/s/${s.slug}/index.html`, html);

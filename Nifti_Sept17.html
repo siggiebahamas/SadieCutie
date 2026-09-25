@@ -3159,6 +3159,12 @@
           <div id="ownerEmailContent"></div>
         </div>
 
+        <div class="settings-card hidden" id="ownerBackupCard">
+          <h2>🗄 Backups <span style="font-size:13px;font-weight:700;opacity:.6;">(only you see this)</span></h2>
+          <div class="sub">A full copy of everything in Nifti is saved every Sunday at 2am, and the last 10 are kept. Download one now and then to keep a copy outside Nifti too (laptop or Google Drive).</div>
+          <div id="ownerBackupContent"></div>
+        </div>
+
         <div class="settings-card hidden" id="ownerBillingCard">
           <h2>💰 Customers &amp; upgrades <span style="font-size:13px;font-weight:700;opacity:.6;">(only you see this)</span></h2>
           <div id="ownerBillingContent"></div>
@@ -5872,7 +5878,8 @@ async function handleIncomingLink(){
   const order = hash.match(/^#o\/([A-Za-z0-9_-]{20,64})$/);
   if(order){ await loadPublicOrder(order[1]); return true; }
   const store = hash.match(/^#s\/([a-z0-9-]{3,40})$/);
-  if(store){ await loadStorePage(store[1]); return true; }
+  if(store){ if(/^https?:$/.test(location.protocol)){ location.replace(appBaseUrl() + 's/' + store[1] + '/' + location.search); return true; } await loadStorePage(store[1]); return true; }
+  if(hash === '#signup'){ window._openSignup = true; history.replaceState(null, '', location.pathname + location.search); }
   const stmt = hash.match(/^#st\/([A-Za-z0-9_-]{20,64})$/);
   if(stmt){ await loadPublicStatement(stmt[1]); return true; }
   const guest = hash.match(/^#g\/([A-Za-z0-9_-]{20,64})$/);
@@ -7307,6 +7314,33 @@ async function renderOwnerBillingCard(){
     <div style="font-weight:800;font-size:15px;margin:16px 0 4px;">Pilot</div>
     <div class="toggle-row"><div><div class="toggle-txt">Everything free for everyone</div><div class="toggle-sub">Turn off when the pilot ends. Paid customers keep Pro; everyone else moves to Free (chat and orders stay free).</div></div><div class="switch ${pilot ? 'on' : ''}" onclick="togglePilot(${pilot ? 'false' : 'true'})"><div class="knob"></div></div></div>`;
 }
+async function renderOwnerBackupCard(){
+  const card = document.getElementById('ownerBackupCard');
+  if(!card) return;
+  if(!myBusiness || !emailSenderStatus || !emailSenderStatus.is_admin){ card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  const el = document.getElementById('ownerBackupContent');
+  const { data, error } = await sb.storage.from('backups').list('', {limit: 20, sortBy: {column: 'name', order: 'desc'}});
+  if(error){ el.innerHTML = `<div class="notif-phone warn">${escapeHtml(error.message)}</div>`; return; }
+  const files = (data || []).filter(f => f.name.startsWith('nifti-backup-'));
+  const when = n => { const m = n.match(/(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})/); return m ? new Date(`${m[1]}T${m[2]}:${m[3]}:00Z`).toLocaleString('en-PH', {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'}) : n; };
+  el.innerHTML = `${files.length ? files.map((f, i) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
+      <div><div style="font-weight:700;">${when(f.name)}${i === 0 ? ' <span style="font-size:12px;color:var(--green);">latest</span>' : ''}</div><div style="font-size:13px;opacity:.7;">${Math.max(1, Math.round(((f.metadata && f.metadata.size) || 0) / 1024))} KB</div></div>
+      <button class="btn btn-outline" style="padding:6px 12px;font-size:14px;" onclick="downloadBackup(${escapeHtml(JSON.stringify(f.name))})">⬇ Download</button></div>`).join('')
+    : '<div style="font-size:14px;opacity:.7;">No backups yet. The first one runs this Sunday, or tap Back up now.</div>'}
+    <button class="btn btn-outline" style="margin-top:10px;" onclick="backupNow()">Back up now</button>`;
+}
+async function downloadBackup(name){
+  const { data, error } = await sb.storage.from('backups').createSignedUrl(name, 120, {download: name});
+  if(error){ showToast("Couldn't download: " + error.message, 'error'); return; }
+  const a = document.createElement('a'); a.href = data.signedUrl; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
+async function backupNow(){
+  const { error } = await sb.rpc('admin_backup_now');
+  if(error){ showToast(error.message, 'error'); return; }
+  showToast('Backing up… it appears here in a few seconds.', 'success');
+  setTimeout(renderOwnerBackupCard, 8000);
+}
 async function decideUpgrade(id, approve){
   const note = approve ? null : prompt('Tell them why (optional):', "We couldn't find this payment. Please check the reference number.");
   const { error } = await sb.rpc('admin_decide_upgrade', {p_request: id, p_approve: approve, p_note: note});
@@ -8469,7 +8503,7 @@ function navigate(page){
     if(page==='suppliers'){ renderSupplierChips(); renderSuppliersTable(); }
     if(page==='invite'){ renderInvitesList(); updatePreview(); }
     if(page==='status') renderStatusPage();
-    if(page==='settings'){ renderOwnerEmailCard().then(renderOwnerBillingCard); renderPauseCard(); renderSharedContactCard(); renderLogisticsPartnersCard(); renderShareLinksCard(); { const qs = document.getElementById('quickShareToggle'); if(qs) qs.classList.toggle('on', quickSharePromptOn()); } document.querySelectorAll('.buyerPublicToggle').forEach(t => t.classList.toggle('on', myBusiness ? !!myBusiness.catalog_public : (currentAppRole==='supplier' ? myCatalogPublic : myBuyerProfilePublic))); renderTeamMembersList(); renderCustomRolesList(); renderBillingSettings(); renderNotificationSettingsPanel(); renderPushLogPanel(); renderTaxProfileSettings(); renderPaymentDetailsSettings(); renderBirDeadlineCard(); renderApprovalThresholdSettings(); renderAuditLogContent(); renderDownstreamSalesSettingsCard(); renderSupportContactForm(); }
+    if(page==='settings'){ renderOwnerEmailCard().then(() => { renderOwnerBillingCard(); renderOwnerBackupCard(); }); renderPauseCard(); renderSharedContactCard(); renderLogisticsPartnersCard(); renderShareLinksCard(); { const qs = document.getElementById('quickShareToggle'); if(qs) qs.classList.toggle('on', quickSharePromptOn()); } document.querySelectorAll('.buyerPublicToggle').forEach(t => t.classList.toggle('on', myBusiness ? !!myBusiness.catalog_public : (currentAppRole==='supplier' ? myCatalogPublic : myBuyerProfilePublic))); renderTeamMembersList(); renderCustomRolesList(); renderBillingSettings(); renderNotificationSettingsPanel(); renderPushLogPanel(); renderTaxProfileSettings(); renderPaymentDetailsSettings(); renderBirDeadlineCard(); renderApprovalThresholdSettings(); renderAuditLogContent(); renderDownstreamSalesSettingsCard(); renderSupportContactForm(); }
   }
   window.scrollTo(0,0);
 }
@@ -24243,7 +24277,7 @@ async function bootNifti(){
   if(NIFTI_IS_PASSWORD_RECOVERY && session) openSetNewPasswordModal();
   if(!signedIn && getPendingClaimCode()) showClaimSignup();
   if(signedIn){
-    try{ const ret = sessionStorage.getItem('nifti-return'); if(ret && /^#s\/[a-z0-9-]{3,40}$/.test(ret)){ sessionStorage.removeItem('nifti-return'); location.replace(appBaseUrl() + ret); return; } }catch(e){}
+    try{ const ret = sessionStorage.getItem('nifti-return'); if(ret && /^#s\/[a-z0-9-]{3,40}$/.test(ret)){ sessionStorage.removeItem('nifti-return'); location.replace(appBaseUrl() + 's/' + ret.slice(3) + '/'); return; } }catch(e){}
     await loadRealPurchaseOrders();
     subscribeToPurchaseOrders();
     retryPendingPOs(); // picks up anything still unsynced from before this reload (see loadRealPurchaseOrders) if we're already back online
@@ -24277,7 +24311,7 @@ async function bootNifti(){
   }
 }
 renderGoogleSignInButtons();
-bootNifti();
+bootNifti().then(() => { if(window._openSignup && !myBusiness){ navigate('login'); const b = document.querySelectorAll('#view-login .tabs button')[1]; if(b) setLoginTab('signup', b); } });
 </script>
 </body>
 </html>
