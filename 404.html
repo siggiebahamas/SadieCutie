@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Nifti</title>
+<script>
+// GitHub Pages serves this for any path that doesn't exist yet. A store link shared before its
+// page was built (/s/<name>/) still opens the store; anything else goes to the home page.
+(function(){
+  var p = location.pathname, m = p.match(/^(.*?)\/s\/([a-z0-9-]{3,40})\/?$/);
+  if(m){ location.replace(m[1] + '/' + location.search + '#s/' + m[2]); return; }
+  var base = p.split('/').slice(0, 2).join('/') + '/';
+  location.replace(base === '//' ? '/' : base);
+})();
+</script></head><body></body></html>

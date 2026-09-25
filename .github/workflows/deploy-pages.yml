@@ -3,6 +3,9 @@ name: Deploy Nifti to GitHub Pages
 on:
   push:
     branches: ["claude/supabase-mcp-connection-j8plcc"]
+  # Rebuild every 2 hours so new online stores get their own Facebook-ready page.
+  schedule:
+    - cron: "41 */2 * * *"
   workflow_dispatch:
 
 permissions:
@@ -35,7 +38,10 @@ jobs:
         run: |
           mkdir -p _site
           cp Nifti_Sept17.html _site/index.html
-          cp manifest.json sw.js icon-512.png robots.txt sitemap.xml _site/
+          cp manifest.json sw.js icon-512.png robots.txt sitemap.xml 404.html _site/
+
+      - name: Build online store pages
+        run: node .github/scripts/build-stores.mjs
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
