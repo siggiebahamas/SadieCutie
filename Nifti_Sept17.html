@@ -2027,6 +2027,7 @@
           <li><span class="check">✓</span>Store insights: visitors, orders, top products</li>
           <li><span class="check">✓</span>Promo prices on your store</li>
           <li><span class="check">✓</span>One-tap statements of account</li>
+          <li><span class="check">✓</span>Credit limits per buyer, checked on every order</li>
           <li><span class="check">✓</span>BIR 2307 tracker for certificates buyers owe you</li>
           <li><span class="check">✓</span>Who pays late, and automatic reminders</li>
           <li><span class="check">✓</span>Up to 15 teammates</li>
@@ -3612,6 +3613,7 @@ async function mapPoRowToJs(row){
     backorderPoId: row.backorder_po_id, replacesPoId: row.replaces_po_id, backorderFromPoId: row.backorder_from_po_id,
     freightMilestones: row.freight_milestones || undefined,
     pendingApproval: row.pending_approval || null,
+    creditFlag: row.credit_flag || null,
   };
 }
 
@@ -4128,7 +4130,7 @@ async function loadMyConnections(){
       lastOrder: mostRecent ? otifShortDateLabel(new Date(mostRecent.createdDate+'T00:00:00')) : 'No orders yet',
       since: r.relationship_since || (r.created_at||'').slice(0,10),
       preferredContact: r.preferred_contact || '', paymentTerms: r.payment_terms || '',
-      creditLimit: r.credit_limit || null, country: r.country || '', location: r.location || '',
+      creditLimit: r.credit_limit || null, creditHoldDays: r.credit_hold_days || null, creditMode: r.credit_mode || 'block', country: r.country || '', location: r.location || '',
     };
   }));
   const ids = mapped.map(m => m.id);
@@ -5989,6 +5991,7 @@ function renderWhoOwesMe(){
     ${groups.map(g => `<div class="owes-row">
       <div style="min-width:0;flex:1;">
         <div style="font-weight:800;font-size:16px;">${escapeHtml(g.name)}</div>
+        ${(() => { const b = (buyersData || []).find(x => x.id === g.id); return b && b.creditLimit ? `<div style="font-size:12.5px;font-weight:700;color:${g.total >= b.creditLimit ? 'var(--danger)' : 'inherit'};opacity:.85;">${fmtPHP(g.total)} of ${fmtPHP(b.creditLimit)} credit used</div>` : ''; })()}
         <div style="font-size:13.5px;opacity:.8;">${g.count} unpaid invoice${g.count>1?'s':''}${g.maxLate > 0 ? ` · <span style="color:var(--danger);font-weight:700;">${g.maxLate} day${g.maxLate>1?'s':''} overdue</span>` : ''}${g.pending > 0 ? ` · <span style="color:var(--lowstock);font-weight:700;">${fmtPHP(g.pending)} to confirm</span>` : ''}</div>
       </div>
       <div style="font-weight:800;font-size:16px;white-space:nowrap;">${fmtPHP(g.total)}</div>
@@ -7178,12 +7181,12 @@ async function clearOwnerEmailSender(){
 let myPlanInfo = null;
 const PRO_FEATURE_LABELS = {
   statements: 'Statements of account', bir2307: 'BIR 2307 tracker', store_insights: 'Store visitors & sales', store_promos: 'Store promos',
-  auto_reminders: 'Automatic payment reminders', late_payers: 'Who pays late', full_history: 'Full history & exports',
+  auto_reminders: 'Automatic payment reminders', late_payers: 'Who pays late', credit_limits: 'Credit limits per buyer', full_history: 'Full history & exports',
   watchdog: "Owner's watchdog", market_price: 'Market price check', price_alerts: 'Price-increase alerts',
 };
 const PRO_PLANS = {
   supplier_pro: {name: 'Supplier Pro', forType: 'supplier', tagline: 'Get paid faster and sell more.',
-    features: ['Online store insights: visitors, orders, top products', 'Promo prices with an end date on your store', 'One-tap statements of account', 'BIR 2307 tracker: see every certificate buyers owe you', 'Who pays late, and by how much', 'Automatic payment reminders', 'Up to 15 teammates']},
+    features: ['Online store insights: visitors, orders, top products', 'Promo prices with an end date on your store', 'One-tap statements of account', 'Credit limits per buyer: hold orders when they owe too much or pay late', 'BIR 2307 tracker: see every certificate buyers owe you', 'Who pays late, and by how much', 'Automatic payment reminders', 'Up to 15 teammates']},
   buyer_pro: {name: 'Buyer Pro', forType: 'buyer', tagline: 'Pay less and stop leaks.',
     features: ["Owner's watchdog: alerts when staff overpay or skip approval", 'Market price check vs other Nifti buyers', 'Price-increase alerts', 'BIR 2307 tracker: never miss a certificate you owe', 'Full history and exports', 'Up to 15 teammates']},
 };
@@ -10942,7 +10945,8 @@ function renderCreditLimitRow(s, isSupplierRole){
   if(isSupplierRole){
     const limit = s.creditLimit;
     const outstanding = getOutstandingBalanceWithParty(s.id, ME_SUPPLIER);
-    return `<div class="expand-detail-item"><div class="k">Credit limit<span class="kpi-info" tabindex="0">ⓘ<span class="kpi-tooltip">If set, Nifti blocks this buyer from sending a new order that would push their outstanding balance with you past this amount.</span></span></div><div class="v">${limit ? fmtPHP(limit)+' (currently owes '+fmtPHP(outstanding)+')' : 'No limit set'} <span class="row-action" onclick="event.stopPropagation(); editCreditLimit('${s.id}')">Edit</span></div></div>`;
+    const terms = [limit ? fmtPHP(limit) + ' limit (owes ' + fmtPHP(outstanding) + ')' : null, s.creditHoldDays ? 'hold if ' + s.creditHoldDays + '+ days late' : null].filter(Boolean).join(' · ');
+    return `<div class="expand-detail-item"><div class="k">Credit terms ${proBadge('credit_limits')}<span class="kpi-info" tabindex="0">ⓘ<span class="kpi-tooltip">New orders from this buyer are checked against these, on the server. ${s.creditMode === 'warn' ? 'Over-limit orders come through flagged.' : 'Over-limit orders are blocked until they pay down.'}</span></span></div><div class="v">${terms || 'None set'}${terms && s.creditMode === 'warn' ? ' · flag only' : ''} <span class="row-action" onclick="event.stopPropagation(); editCreditLimit('${s.id}')">Edit</span></div></div>`;
   }
   // Buyer's view of their own limit with this supplier. For a real account, `s` is that real
   // connection (loadMyConnections already carries its real credit_limit) — the old version only
@@ -10971,30 +10975,40 @@ function editCreditLimit(partyId){
   if(!el) return;
   if(el.innerHTML.trim() !== ''){ el.innerHTML = ''; return; }
   const party = buyersData.find(p=>p.id===partyId);
-  el.innerHTML = `<div class="spine-inline-action" style="margin-top:6px;">
-    <label style="font-size:14px;color:var(--ink);display:block;margin-bottom:4px;">Credit limit (PHP) — leave blank for no limit</label>
-    <input type="number" id="creditLimitInput_${partyId}" value="${party.creditLimit || ''}" placeholder="e.g. 100000" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-family:var(--font-b);font-size:15px;margin-bottom:8px;box-sizing:border-box;">
+  const mode = party.creditMode || 'block';
+  el.innerHTML = `<div class="spine-inline-action" style="margin-top:6px;" onclick="event.stopPropagation()">
+    <div style="font-weight:800;font-size:15px;margin-bottom:6px;">Credit terms for ${escapeHtml(party.name)} ${proBadge('credit_limits')}</div>
+    <div class="row-2">
+      <div class="field"><label>Most they can owe you (₱)</label><input type="number" id="creditLimitInput_${partyId}" value="${party.creditLimit || ''}" placeholder="Blank = no limit"></div>
+      <div class="field"><label>Hold orders if an invoice is late by more than (days)</label><input type="number" id="creditHoldInput_${partyId}" value="${party.creditHoldDays || ''}" placeholder="Blank = off"></div>
+    </div>
+    <label class="store-radio"><input type="radio" name="creditMode_${partyId}" value="block" ${mode === 'block' ? 'checked' : ''}> <span><strong>Block</strong> the order until they pay down</span></label>
+    <label class="store-radio"><input type="radio" name="creditMode_${partyId}" value="warn" ${mode === 'warn' ? 'checked' : ''}> <span><strong>Let it through with a red flag</strong>, and I'll decide</span></label>
+    <div style="font-size:13px;opacity:.75;margin:4px 0 8px;">Counts unpaid invoices plus orders still in progress. The buyer sees their limit and why an order is held.</div>
     <button class="btn btn-primary" style="padding:7px 14px;font-size:15px;" onclick="event.stopPropagation(); saveCreditLimit('${partyId}')">Save →</button>
   </div>`;
 }
 async function saveCreditLimit(partyId){
-  if(!requirePermission('markInvoicePaid')) return; // no dedicated permission key for this yet — finance-adjacent risk control, reuses the closest existing one (same convention as submitSalesInvoice)
+  if(!requireCreditLimitsEntitlement()) return;
   const party = buyersData.find(p=>p.id===partyId);
-  const raw = document.getElementById('creditLimitInput_'+partyId).value.trim();
-  const val = raw ? Number(raw) : null;
-  if(raw && (isNaN(val) || val<=0)){ markFieldInvalid('creditLimitInput_'+partyId, 'Please enter a valid amount, or leave it blank for no limit.'); return; }
-  const oldVal = party.creditLimit;
-  party.creditLimit = val;
-  if(oldVal !== val) logAudit('manual_override', 'buyer', partyId, 'creditLimit', oldVal, val);
+  const rawLimit = document.getElementById('creditLimitInput_'+partyId).value.trim();
+  const rawHold = document.getElementById('creditHoldInput_'+partyId).value.trim();
+  const limit = rawLimit ? Number(rawLimit) : null, hold = rawHold ? Math.round(Number(rawHold)) : null;
+  const modeEl = document.querySelector(`input[name="creditMode_${partyId}"]:checked`);
+  const mode = modeEl ? modeEl.value : 'block';
+  if(rawLimit && (isNaN(limit) || limit <= 0)){ markFieldInvalid('creditLimitInput_'+partyId, 'Enter an amount above zero, or leave it blank.'); return; }
+  if(rawHold && (isNaN(hold) || hold < 1 || hold > 365)){ markFieldInvalid('creditHoldInput_'+partyId, 'Enter 1 to 365 days, or leave it blank.'); return; }
+  if(myBusiness){
+    const { error } = await sb.rpc('set_credit_terms', {p_buyer: partyId, p_limit: limit, p_hold_days: hold, p_mode: mode});
+    if(error){ showToast("Couldn't save: " + error.message, 'error'); return; }
+  }
+  if(party.creditLimit !== limit) logAudit('manual_override', 'buyer', partyId, 'creditLimit', party.creditLimit, limit);
+  party.creditLimit = limit; party.creditHoldDays = hold; party.creditMode = mode;
   document.getElementById('creditLimitForm_'+partyId).innerHTML = '';
   renderSuppliersTable();
-  showToast(val ? `Credit limit set to ${fmtPHP(val)}.` : 'Credit limit removed.', 'success');
+  if(document.getElementById('whoOwesMePanel')) renderWhoOwesMe();
+  showToast(limit || hold ? 'Credit terms saved. New orders are checked automatically.' : 'Credit terms removed.', 'success');
   scheduleNiftiSave();
-  // Only ever called from the supplier side (see the comment above renderCreditLimitRow) — partyId
-  // is the buyer, myBusiness is the supplier granting the limit.
-  if(myBusiness && !(await syncBusinessRelationshipField(partyId, myBusiness.id, 'credit_limit', val))){
-    showToast("Credit limit couldn't be saved to your account — the buyer won't see this limit yet. Try again.", 'error');
-  }
 }
 // Section 7 #15 — Payment Status: a read-only filtered view of existing order/invoice data,
 // organized by what's owed. Never a general ledger or bookkeeping engine.
@@ -14298,7 +14312,23 @@ function openSendConfirmModal(id){
   // demo's one simulated relationship, so a real buyer's credit limit was never enforced at all.
   const creditLimit = myBusiness ? (supplier ? supplier.creditLimit : null) : (po.supplierId === ME_SUPPLIER ? ((buyersData.find(b=>b.id===ME_BUYER)||{}).creditLimit) : null);
   const creditBuyerId = myBusiness ? myBusiness.id : ME_BUYER;
-  if(creditLimit){
+  const creditMode = myBusiness && supplier ? (supplier.creditMode || 'block') : 'block';
+  const holdDays = myBusiness && supplier ? supplier.creditHoldDays : null;
+  if(holdDays && creditMode === 'block'){
+    const late = purchaseOrders.filter(p => p.buyerId === creditBuyerId && p.supplierId === po.supplierId && p.invoice && p.invoice.dueDate && computeInvoicePayments(p).balance >= 1)
+      .reduce((mx, p) => Math.max(mx, daysBetween(p.invoice.dueDate, APP_TODAY)), 0);
+    if(late > holdDays){
+      document.getElementById('sendConfirmHeading').textContent = 'Order on hold — late payment';
+      document.getElementById('sendConfirmYesBtn').classList.add('hidden');
+      document.getElementById('sendConfirmApprovalBtn').classList.add('hidden');
+      document.getElementById('sendConfirmCancelBtn').textContent = 'Close';
+      document.getElementById('sendConfirmText').innerHTML = `<div style="padding:12px 14px;background:var(--danger-soft);border:1.5px solid var(--danger);border-radius:10px;"><div style="font-weight:800;color:var(--danger);margin-bottom:8px;">${escapeHtml(po.supplierName)} holds new orders while an invoice is more than ${holdDays} days late.</div><div style="font-size:15px;line-height:1.6;">Your oldest unpaid invoice with them is ${late} days late. Pay it (or tell them you already did, under Payments), then send this order.</div></div>`;
+      document.getElementById('sendConfirmModal').dataset.poId = '';
+      document.getElementById('sendConfirmModal').classList.remove('hidden');
+      return;
+    }
+  }
+  if(creditLimit && creditMode === 'block'){
     const outstanding = getOutstandingBalanceWithParty(creditBuyerId, po.supplierId);
     const thisOrderTotal = poTotal(po);
     const wouldBe = outstanding + thisOrderTotal;
@@ -16977,6 +17007,7 @@ function renderSupplierPoDetail(o){
     <div style="font-size:16px;color:var(--ink);margin-bottom:6px;"><strong>Requested delivery:</strong> ${o.requestedDeliveryDate} · <strong>Ship to:</strong> ${o.deliveryAddress}</div>
     ${o.riskNote ? `<div class="logi-note" style="color:var(--danger);">⏱ ${o.riskNote}</div>` : ''}
     ${renderUndoBanner(o, 'supplier')}
+    ${o.creditFlag ? `<div class="logi-note" style="border-color:var(--danger);background:var(--danger-soft);margin-bottom:8px;"><strong style="color:var(--danger);">⚠ Over this buyer's credit terms.</strong> ${escapeHtml(o.creditFlag.reason || '')} Owes ${fmtPHP(o.creditFlag.owed || 0)}${o.creditFlag.open_orders ? ' plus ' + fmtPHP(o.creditFlag.open_orders) + ' in open orders' : ''}. You decide whether to confirm.</div>` : ''}
     ${renderRmaBanner(o)}
     ${renderDepositSection(o, 'supplier')}
     <div class="expand-actions" style="margin-top:16px;">${actionsHtml}</div>
@@ -22205,12 +22236,7 @@ function requireDeliveryRouteEntitlement(){
   openUpgradePrompt(`Delivery route planning is available on Business and above. You're currently on ${plan.name}.`);
   return false;
 }
-function requireCreditLimitsEntitlement(){
-  const plan = getEffectivePlan();
-  if(plan.creditLimits) return true;
-  openUpgradePrompt(`Setting credit limits per buyer is available on Business and above. You're currently on ${plan.name}.`);
-  return false;
-}
+function requireCreditLimitsEntitlement(){ return requireFeature('credit_limits'); }
 function openUpgradePrompt(message){
   document.getElementById('upgradePromptBody').innerHTML = `
     <p style="font-size:15px;color:var(--ink);margin-bottom:16px;">${message}</p>
