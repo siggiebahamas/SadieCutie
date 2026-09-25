@@ -706,6 +706,7 @@
 
 
   .settings-card:empty{display:none;}
+  body[data-role="buyer"] .only-supplier, body[data-role="supplier"] .only-buyer{display:none !important;}
   #statementView{position:fixed;inset:0;z-index:300;background:var(--bg);overflow-y:auto;padding:12px 12px 40px;}
   body.statement-open{overflow:hidden;}
   .stmt-toolbar{max-width:820px;margin:0 auto 12px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -2453,6 +2454,9 @@
     <div class="nav-group">
       <div class="heading">More</div>
       <div class="nav-item hidden" id="salesNavItem" data-page="sales" onclick="navigate('sales')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg><span>Sales</span></div>
+      <div class="nav-item only-supplier" data-page="store" onclick="navigate('store')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v11h16V9"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M10 20v-6h4v6"/></svg><span>Online store</span></div>
+      <div class="nav-item only-buyer" data-page="watchdog" onclick="navigate('watchdog')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span>Watchdog</span></div>
+      <div class="nav-item" data-page="taxforms" onclick="navigate('taxforms')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg><span>BIR 2307s</span></div>
       <div class="nav-item" data-page="team" onclick="navigate('team')" style="position:relative;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>Team</span><span id="teamNavBadge" class="nav-badge" style="display:none;"></span></div>
       <div class="nav-item" data-page="analytics" onclick="navigate('analytics')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg><span data-i18n="nav_analytics">Analytics</span></div>
       <div class="nav-item" data-page="discover" onclick="navigate('discover')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span data-i18n="nav_discover">Discover</span></div>
@@ -2484,6 +2488,9 @@
     <div class="more-sheet-grid">
       <button class="more-sheet-item" data-page="inventory" onclick="closeMoreSheet(); navigate('inventory')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg><span>Inventory</span></button>
       <button class="more-sheet-item" data-page="sales" id="moreSheetSales" onclick="closeMoreSheet(); navigate('sales')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg><span>Sales</span></button>
+      <button class="more-sheet-item only-supplier" data-page="store" onclick="closeMoreSheet(); navigate('store')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v11h16V9"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M10 20v-6h4v6"/></svg><span>Store</span></button>
+      <button class="more-sheet-item only-buyer" data-page="watchdog" onclick="closeMoreSheet(); navigate('watchdog')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span>Watchdog</span></button>
+      <button class="more-sheet-item" data-page="taxforms" onclick="closeMoreSheet(); navigate('taxforms')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg><span>2307s</span></button>
       <button class="more-sheet-item" data-page="team" onclick="closeMoreSheet(); navigate('team')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>Team</span></button>
       <button class="more-sheet-item" data-page="analytics" onclick="closeMoreSheet(); navigate('analytics')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg><span>Analytics</span></button>
       <button class="more-sheet-item" data-page="discover" onclick="closeMoreSheet(); navigate('discover')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>Discover</span></button>
@@ -3322,6 +3329,21 @@
           <h2>Pause your business</h2>
           <div id="pauseAccountContent"></div>
         </div>
+      </div>
+
+      <div id="page-taxforms" class="app-page">
+        <div class="page-head"><h1>BIR 2307 tracker <span id="taxFormsBadge"></span></h1><p>Every withholding tax certificate, by partner and quarter.</p></div>
+        <div id="taxFormsContent"></div>
+      </div>
+
+      <div id="page-watchdog" class="app-page">
+        <div class="page-head"><h1>Owner's watchdog <span id="watchdogBadge"></span></h1><p>Orders that cost more than they should, or skipped your rules.</p></div>
+        <div id="watchdogContent"></div>
+      </div>
+
+      <div id="page-store" class="app-page">
+        <div class="page-head"><h1>Your online store</h1><p>One link for Facebook, Viber and Messenger. Buyers order in a minute, and it lands here.</p></div>
+        <div id="storeContent"></div>
       </div>
 
       <div id="page-status" class="app-page">
@@ -4459,7 +4481,7 @@ window.addEventListener('online', () => {
   if(document.getElementById('supplierOrderRows')) renderSupplierOrdersTable();
   if(activeConvId){ const conv = getConversations().find(c=>c.id===activeConvId); if(conv) renderThread(conv); }
 });
-const appPages = ['dashboard','messages','suppliers','orders','inventory','invite','discover','analytics','datacenter','settings','status','team','sales'];
+const appPages = ['dashboard','messages','suppliers','orders','inventory','invite','discover','analytics','datacenter','settings','status','team','sales','taxforms','watchdog','store'];
 
 /* ============ SETTINGS PAGE ACTIONS ============ */
 let currentAvatarPhoto = null;
@@ -5337,7 +5359,7 @@ const ROLE_PERMISSIONS = {
   'General Manager': null,
   'Purchasing Agent': ['dashboard','messages','suppliers','orders','inventory','invite','discover','analytics'],
   'Warehouse Manager': ['dashboard','messages','orders','inventory'],
-  'Finance': ['dashboard','orders','suppliers','analytics'],
+  'Finance': ['dashboard','orders','suppliers','analytics','taxforms'],
   'Viewer': ['dashboard','analytics'],
 };
 const PRIVILEGED_ROLES = ['Owner','General Manager'];
@@ -5346,7 +5368,7 @@ const PRIVILEGED_ROLES = ['Owner','General Manager'];
 const PAGE_DISPLAY_NAMES = {
   dashboard:'Dashboard', messages:'Messages', suppliers:'My Suppliers', orders:'Orders',
   inventory:'Inventory', invite:'Invite a Supplier', discover:'Discover', analytics:'Analytics',
-  datacenter:'Upload Data', settings:'Settings',
+  datacenter:'Upload Data', settings:'Settings', taxforms:'BIR 2307 tracker', watchdog:"Owner's watchdog", store:'Online store',
 };
 // Owner-defined roles, built around exactly what one person should do — e.g. Messages only, for
 // someone who just manages chats. A custom role is never privileged: it can't manage other
@@ -5499,6 +5521,7 @@ function setPreviewRole(role){
 function openMoreSheet(){
   document.getElementById('moreSheet').classList.remove('hidden');
   document.getElementById('moreSheetBackdrop').classList.remove('hidden');
+  syncRoleNavVisibility();
   const roleRow = document.getElementById('moreSheetRoleRow');
   if(roleRow) roleRow.style.display = myBusiness ? 'none' : '';
   const salesItem = document.getElementById('moreSheetSales');
@@ -7450,6 +7473,230 @@ async function loadPublicStatement(token){
   showStatementOverlay(d, {isPublic: true});
 }
 
+/* ============ BIR 2307 TRACKER (Pro) ============
+   When a buyer withholds 1% (goods) or 2% (services) from a payment, they owe the supplier a BIR
+   Form 2307 so the supplier can claim that tax back. Suppliers chase these for months. Here the
+   withheld amount is recorded on the invoice (it counts toward the balance once the supplier
+   confirms it, like any payment), and this page tracks every certificate by partner and quarter:
+   owed → sent (buyer) → received (supplier), with a printable worksheet of the exact numbers the
+   form needs and reminders in the morning summary. */
+const EWT_KINDS = {
+  goods: {label: 'Goods (1%)', rate: 0.01, atc: {corp: 'WC158', indiv: 'WI158'}},
+  services: {label: 'Services (2%)', rate: 0.02, atc: {corp: 'WC160', indiv: 'WI160'}},
+};
+function ewtDefaults(supplierId){
+  try{ return JSON.parse(localStorage.getItem('nifti-ewt:' + supplierId) || 'null') || {kind: 'goods', payee: 'corp'}; }catch(e){ return {kind: 'goods', payee: 'corp'}; }
+}
+function renderEwtRecorder(po, side, room){
+  if(room <= 0) return '';
+  const d = ewtDefaults(po.supplierId);
+  setTimeout(() => updateEwtPreview(po.id), 0);
+  return `<div style="border-top:1px dashed var(--border);margin-top:12px;padding-top:10px;" onclick="event.stopPropagation()">
+    <details id="ewtBox_${po.id}"><summary style="cursor:pointer;font-weight:700;font-size:15px;">🧾 ${side === 'buyer' ? 'Did you withhold tax? (BIR 2307)' : 'Buyer withheld tax? (BIR 2307)'}</summary>
+      <div style="font-size:13.5px;opacity:.8;margin:6px 0 8px;">${side === 'buyer' ? 'If your company withholds 1% or 2% when paying, record it here. It closes that part of the invoice once the supplier confirms, and the 2307 tracker reminds you to send the certificate.' : 'If the buyer paid less because they withheld tax, record it here. It closes the invoice and the 2307 tracker follows up on the certificate they owe you.'}</div>
+      <div class="row-2">
+        <div class="field"><label>For</label><select id="ewtKind_${po.id}" onchange="updateEwtPreview('${po.id}')">${Object.entries(EWT_KINDS).map(([k, v]) => `<option value="${k}" ${d.kind === k ? 'selected' : ''}>${v.label}</option>`).join('')}</select></div>
+        <div class="field"><label>Supplier is a</label><select id="ewtPayee_${po.id}" onchange="updateEwtPreview('${po.id}')"><option value="corp" ${d.payee === 'corp' ? 'selected' : ''}>Corporation / partnership</option><option value="indiv" ${d.payee === 'indiv' ? 'selected' : ''}>Sole proprietor (DTI)</option></select></div>
+      </div>
+      <div class="field"><label>Amount before VAT</label><input type="number" id="ewtBase_${po.id}" min="0" step="0.01" value="${roundPeso(poTotal(po) / (1 + Number(po.taxRate || 0)))}" oninput="updateEwtPreview('${po.id}')"></div>
+      <div id="ewtPreview_${po.id}" style="font-size:15px;margin-bottom:8px;"></div>
+      <button class="btn btn-outline" onclick="submitEwt('${po.id}')">Record withheld tax</button>
+    </details></div>`;
+}
+function ewtCompute(poId){
+  const kind = EWT_KINDS[document.getElementById('ewtKind_' + poId).value] || EWT_KINDS.goods;
+  const payee = document.getElementById('ewtPayee_' + poId).value;
+  const base = Math.max(0, Number(document.getElementById('ewtBase_' + poId).value) || 0);
+  return {kind, payee, base: roundPeso(base), amount: Math.round(base * kind.rate * 100) / 100, atc: kind.atc[payee] || kind.atc.corp};
+}
+function updateEwtPreview(poId){
+  const el = document.getElementById('ewtPreview_' + poId);
+  if(!el) return;
+  const c = ewtCompute(poId);
+  el.innerHTML = `Tax withheld: <strong>${fmtPHP(c.amount)}</strong> <span style="opacity:.7;">(${(c.kind.rate * 100)}% of ${fmtPHP(c.base)}, ATC ${c.atc})</span>`;
+}
+function submitEwt(poId){
+  if(!requirePermission('markInvoicePaid')) return;
+  const po = getPO(poId);
+  if(!po || !po.invoice) return;
+  const side = viewerSideForPo(po);
+  const c = ewtCompute(poId);
+  const {balance, pendingAmount} = computeInvoicePayments(po);
+  const room = side === 'buyer' ? roundPeso(balance - pendingAmount) : balance;
+  if(c.amount <= 0){ markFieldInvalid('ewtBase_' + poId, 'Enter the amount before VAT.'); return; }
+  if(c.amount > room + 0.01){ markFieldInvalid('ewtBase_' + poId, `That's more than what's left on this invoice (${fmtPHP(room)}).`); return; }
+  if((po.invoice.payments || []).some(p => p.method === 'ewt' && p.confirmStatus !== 'rejected')){ showToast('Withheld tax is already recorded on this invoice.', 'error'); return; }
+  try{ localStorage.setItem('nifti-ewt:' + po.supplierId, JSON.stringify({kind: document.getElementById('ewtKind_' + poId).value, payee: c.payee})); }catch(e){}
+  snapshotPO(po);
+  const entry = {id: newRecordId(), method: 'ewt', amount: c.amount, reference: c.atc, date: APP_TODAY, ewtRate: c.kind.rate, ewtBase: c.base, atc: c.atc, submittedBy: side};
+  if(side === 'supplier'){ entry.confirmStatus = 'confirmed'; entry.confirmedAt = APP_TODAY; } else entry.confirmStatus = 'pending';
+  paymentListFor(po, 'invoice').push(entry);
+  if(side === 'supplier') settleInvoiceStatus(po);
+  poLogHistory(po, side, `Tax withheld (BIR 2307): ${fmtPHP(c.amount)} — ${(c.kind.rate * 100)}% of ${fmtPHP(c.base)}, ATC ${c.atc}${side === 'buyer' ? ` — waiting for ${po.supplierName} to confirm` : ''}`);
+  showToast(side === 'buyer' ? `Recorded. ${po.supplierName} confirms it like a payment, and the 2307 tracker will remind you to send the certificate.` : 'Recorded. The 2307 tracker will follow up on the certificate.', 'success');
+  afterPaymentChange(po);
+}
+
+// ---- The tracker page ----
+let taxFormsCache = null;
+const demo2307Status = {};
+function buildLocal2307(){
+  const today = APP_TODAY;
+  const groups = {};
+  const add = (po, role) => (po.invoice && po.invoice.payments || []).forEach(p => {
+    if(p.method !== 'ewt' || p.confirmStatus === 'rejected') return;
+    const d = (p.date || po.createdDate || today).slice(0, 10);
+    const q = d.slice(0, 4) + '-Q' + Math.ceil(Number(d.slice(5, 7)) / 3);
+    const cp = role === 'buyer' ? po.supplierId : po.buyerId;
+    const key = role + '|' + cp + '|' + q;
+    const g = groups[key] || (groups[key] = {role, counterparty_id: cp, counterparty: role === 'buyer' ? po.supplierName : po.buyerName, quarter: q, tax: 0, base: 0, count: 0, tax_pending: 0, lines: []});
+    g.tax += Number(p.amount || 0); g.base += Number(p.ewtBase || 0); g.count++;
+    if(p.confirmStatus === 'pending') g.tax_pending += Number(p.amount || 0);
+    g.lines.push({month: ((Number(d.slice(5, 7)) - 1) % 3) + 1, date: d, atc: p.atc, rate: p.ewtRate, base: p.ewtBase, tax: p.amount, po_number: po.poNumber, invoice_number: po.invoice.number, status: p.confirmStatus || 'confirmed'});
+  });
+  getBuyerPOs().forEach(po => add(po, 'buyer'));
+  getSupplierPOs().forEach(po => add(po, 'supplier'));
+  let rows = Object.values(groups);
+  if(!rows.length){
+    // Demo only: one example so the page isn't empty.
+    rows = [{role: currentAppRole, counterparty_id: 'example', counterparty: currentAppRole === 'buyer' ? 'Metro Steel Co.' : 'Dela Cruz Hardware', quarter: '2026-Q2', tax: 1840, base: 184000, count: 3, tax_pending: 0, example: true,
+      lines: [{month: 1, date: '2026-04-12', atc: 'WC158', rate: 0.01, base: 64000, tax: 640, po_number: 'PO-2026-0611', invoice_number: 'INV-2026-0301'}, {month: 2, date: '2026-05-20', atc: 'WC158', rate: 0.01, base: 70000, tax: 700, po_number: 'PO-2026-0680', invoice_number: 'INV-2026-0344'}, {month: 3, date: '2026-06-18', atc: 'WC158', rate: 0.01, base: 50000, tax: 500, po_number: 'PO-2026-0731', invoice_number: 'INV-2026-0371'}]}];
+  }
+  return rows.map(g => {
+    const [y, qq] = g.quarter.split('-Q');
+    const qEnd = new Date(Number(y), Number(qq) * 3, 0);
+    const due = new Date(Number(y), Number(qq) * 3, 20).toISOString().slice(0, 10);
+    const st = demo2307Status[g.role + '|' + g.counterparty_id + '|' + g.quarter] || 'owed';
+    return Object.assign(g, {due, status: st, quarter_ended: today > qEnd.toISOString().slice(0, 10), overdue: today > due && st === 'owed'});
+  }).filter(g => g.role === currentAppRole).sort((a, b) => b.quarter.localeCompare(a.quarter));
+}
+async function renderTaxFormsPage(){
+  const el = document.getElementById('taxFormsContent');
+  if(!el) return;
+  const head = document.getElementById('taxFormsBadge'); if(head) head.innerHTML = proBadge('bir2307');
+  if(!hasFeature('bir2307')){ el.innerHTML = lockedPanelHtml('bir2307', currentAppRole === 'supplier' ? 'See every 2307 your buyers owe you, how much tax credit is missing, and send one-tap reminders.' : 'Never miss a 2307 you owe: every supplier and quarter in one list, with the exact numbers for the form.'); return; }
+  let rows = [];
+  if(myBusiness){
+    el.innerHTML = '<div class="panel-card">Loading…</div>';
+    const { data, error } = await sb.rpc('ewt_tracker');
+    if(error){ el.innerHTML = `<div class="panel-card">${escapeHtml(error.message)}</div>`; return; }
+    rows = (data || []).filter(r => r.role === currentAppRole);
+  } else rows = buildLocal2307();
+  taxFormsCache = rows;
+  const isSup = currentAppRole === 'supplier';
+  const year = String(APP_TODAY).slice(0, 4);
+  const yearTax = rows.filter(r => r.quarter.startsWith(year)).reduce((s, r) => s + Number(r.tax), 0);
+  const missing = rows.filter(r => r.quarter_ended && r.status !== 'received');
+  const toSend = rows.filter(r => r.quarter_ended && r.status === 'owed');
+  const statusPill = r => r.status === 'received' ? '<span class="status-pill pill-joined">✓ Received</span>'
+    : r.status === 'sent' ? `<span class="status-pill pill-sent">${isSup ? 'Buyer says sent' : 'Sent'}</span>`
+    : r.overdue ? '<span class="status-pill" style="background:var(--danger-soft);color:var(--danger);">Overdue</span>'
+    : r.quarter_ended ? `<span class="status-pill pill-sent">${isSup ? 'Waiting' : 'To send'}</span>` : '<span class="status-pill" style="opacity:.7;">Quarter not over yet</span>';
+  el.innerHTML = `
+    <div class="panel-card" style="margin-bottom:16px;">
+      <div style="display:flex;gap:24px;flex-wrap:wrap;">
+        <div><div style="font-size:13px;opacity:.7;">${isSup ? `Tax withheld from you in ${year}` : `Tax you withheld in ${year}`}</div><div style="font-size:22px;font-weight:800;">${fmtPHP(yearTax)}</div></div>
+        ${isSup ? `<div><div style="font-size:13px;opacity:.7;">Certificates still missing</div><div style="font-size:22px;font-weight:800;color:${missing.length ? 'var(--danger)' : 'inherit'};">${missing.length} · ${fmtPHP(missing.reduce((s, r) => s + Number(r.tax), 0))}</div></div>`
+          : `<div><div style="font-size:13px;opacity:.7;">Certificates to send</div><div style="font-size:22px;font-weight:800;color:${toSend.length ? 'var(--danger)' : 'inherit'};">${toSend.length}</div></div>`}
+      </div>
+      <details style="margin-top:10px;"><summary style="cursor:pointer;font-size:14.5px;font-weight:700;">What is a 2307, in plain words?</summary>
+        <div style="font-size:14.5px;line-height:1.55;margin-top:6px;">Big buyers keep 1% (goods) or 2% (services) of what they pay a supplier and pay it to BIR instead. The BIR Form 2307 is the buyer's proof of that. The supplier needs it to subtract that amount from their own income tax, so a missing 2307 is money the supplier loses. The buyer should hand it over within 20 days after each quarter ends. Record withheld tax on the invoice (Payments → "Did you withhold tax?"), and this page does the chasing.</div></details>
+    </div>
+    ${rows.length ? rows.map(r => `<div class="panel-card" style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start;">
+        <div><div style="font-weight:800;font-size:16px;">${escapeHtml(r.counterparty)}${r.example ? ' <span style="font-size:12px;opacity:.6;">(example)</span>' : ''}</div>
+          <div style="font-size:13.5px;opacity:.8;">${r.quarter.replace('-', ' ')} · ${r.count} payment${r.count > 1 ? 's' : ''} · due ${stmtDate(r.due)}${r.tax_pending > 0 ? ` · ${fmtPHP(r.tax_pending)} not yet confirmed` : ''}</div></div>
+        <div style="text-align:right;"><div style="font-weight:800;font-size:18px;">${fmtPHP(r.tax)}</div>${statusPill(r)}</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn btn-outline" style="padding:6px 12px;font-size:14px;" onclick="open2307Worksheet('${r.counterparty_id}', '${r.quarter}')">📄 Worksheet</button>
+        ${!isSup && r.status === 'owed' ? `<button class="btn btn-primary" style="padding:6px 12px;font-size:14px;" onclick="mark2307('${r.counterparty_id}', '${r.quarter}', 'sent')">Mark as sent</button>` : ''}
+        ${!isSup && r.status === 'sent' ? `<span class="row-action" style="font-size:13.5px;align-self:center;" onclick="mark2307('${r.counterparty_id}', '${r.quarter}', 'owed')">Undo</span>` : ''}
+        ${isSup && r.status !== 'received' ? `<button class="btn btn-primary" style="padding:6px 12px;font-size:14px;" onclick="mark2307('${r.counterparty_id}', '${r.quarter}', 'received')">Mark received</button>
+          <button class="btn btn-outline" style="padding:6px 12px;font-size:14px;" onclick="remind2307('${r.counterparty_id}', '${r.quarter}')">Remind</button>` : ''}
+      </div>
+      ${r.note ? `<div style="font-size:13.5px;opacity:.8;margin-top:6px;">Note: ${escapeHtml(r.note)}</div>` : ''}
+      <div id="remind2307_${r.counterparty_id}_${r.quarter}"></div>
+    </div>`).join('')
+    : `<div class="panel-card" style="text-align:center;padding:28px;"><div style="font-size:34px;">🧾</div><div style="font-weight:800;margin-top:6px;">No withheld tax recorded yet</div><div style="font-size:14.5px;opacity:.8;margin-top:4px;">When ${isSup ? 'a buyer pays you less because they withheld tax' : 'you withhold tax from a supplier payment'}, open the invoice → Payments → "${isSup ? 'Buyer withheld tax?' : 'Did you withhold tax?'}". It shows up here.</div></div>`}`;
+}
+async function mark2307(cpId, quarter, status){
+  if(cpId === 'example'){ showToast('This is an example. Record withheld tax on a real invoice to track it.'); return; }
+  let note = null;
+  if(status === 'sent') note = prompt('How did you send it? (optional, e.g. "emailed to accounting@…")', '') || null;
+  if(myBusiness){
+    const { error } = await sb.rpc('set_2307_status', {p_counterparty: cpId, p_quarter: quarter, p_status: status, p_note: note});
+    if(error){ showToast(error.message, 'error'); return; }
+  } else demo2307Status[currentAppRole + '|' + cpId + '|' + quarter] = status;
+  showToast(status === 'sent' ? 'Marked as sent. Your supplier was notified.' : status === 'received' ? 'Marked as received. Your buyer was notified.' : 'Undone.', 'success');
+  renderTaxFormsPage();
+}
+function remind2307(cpId, quarter){
+  const r = (taxFormsCache || []).find(x => x.counterparty_id === cpId && x.quarter === quarter);
+  const el = document.getElementById('remind2307_' + cpId + '_' + quarter);
+  if(!r || !el) return;
+  const me = myBusiness ? myBusiness.name : 'Metro Steel Co.';
+  const text = `Hi ${r.counterparty}! Friendly follow-up from ${me}: may we request your BIR Form 2307 for ${r.quarter.replace('-', ' ')}? Tax withheld: ${fmtPHP(r.tax)} across ${r.count} payment${r.count > 1 ? 's' : ''}. We need it for our quarterly filing. Salamat po!`;
+  const conv = getConversations().find(c => c.id === cpId);
+  el.innerHTML = `<div class="share-box" style="margin-top:8px;">
+    ${conv ? `<button class="btn btn-primary" style="width:100%;margin-bottom:8px;" onclick="sendTextInChat('${cpId}', ${escapeHtml(JSON.stringify(text))}); this.closest('.share-box').innerHTML = '✓ Sent in your chat.';">💬 Send in Nifti chat</button>` : ''}
+    ${shareButtonsHtml('r2307:' + cpId + quarter, text, {hint: false})}</div>`;
+}
+function sendTextInChat(partnerId, text){
+  const conv = getConversations().find(c => c.id === partnerId);
+  if(!conv){ showToast("There's no chat with them yet. Send it on Viber instead."); return false; }
+  const newMsg = {id: newMessageId(), from: 'me', text, time: 'Just now', date: APP_TODAY};
+  conv.messages.push(newMsg);
+  capConversationMessages(conv);
+  if(myBusiness) sendRealMessage(conv, newMsg);
+  scheduleNiftiSave();
+  return true;
+}
+async function open2307Worksheet(cpId, quarter){
+  let w;
+  if(myBusiness){
+    const { data, error } = await sb.rpc('form2307_worksheet', {p_counterparty: cpId, p_quarter: quarter});
+    if(error){ showToast(error.message, 'error'); return; }
+    w = data;
+  } else {
+    const r = (taxFormsCache || []).find(x => x.counterparty_id === cpId && x.quarter === quarter);
+    if(!r) return;
+    const byAtc = {};
+    r.lines.forEach(l => { const a = byAtc[l.atc] || (byAtc[l.atc] = {atc: l.atc, rate: l.rate, m1: 0, m2: 0, m3: 0, total: 0, tax: 0}); a['m' + l.month] += Number(l.base || 0); a.total += Number(l.base || 0); a.tax += Number(l.tax || 0); });
+    const [y, qq] = quarter.split('-Q');
+    const me = {name: taxProfiles[currentAppRole].businessName, tin: taxProfiles[currentAppRole].tin, address: taxProfiles[currentAppRole].registeredAddress};
+    const them = {name: r.counterparty, tin: '', address: ''};
+    w = {quarter, period_from: `${y}-${String(Number(qq) * 3 - 2).padStart(2, '0')}-01`, period_to: new Date(Number(y), Number(qq) * 3, 0).toISOString().slice(0, 10),
+      payee: currentAppRole === 'supplier' ? me : them, payor: currentAppRole === 'buyer' ? me : them, rows: Object.values(byAtc)};
+  }
+  const [y, qq] = quarter.split('-Q');
+  const months = [1, 2, 3].map(i => new Date(Number(y), (Number(qq) - 1) * 3 + i - 1, 1).toLocaleDateString('en-PH', {month: 'short'}));
+  const party = (label, p) => `<div style="margin-bottom:10px;"><div class="stmt-small">${label}</div><div style="font-weight:800;">${escapeHtml(p.name || '')}</div>
+    <div style="font-size:14px;">TIN: ${p.tin ? escapeHtml(p.tin) : '<span style="color:var(--danger);">missing, ask them</span>'}</div><div style="font-size:14px;">Address: ${escapeHtml(p.address || '—')}</div></div>`;
+  const tot = w.rows.reduce((s, r) => ({base: s.base + Number(r.total), tax: s.tax + Number(r.tax)}), {base: 0, tax: 0});
+  const html = `<div class="stmt-paper">
+    <div class="stmt-head"><div><div class="stmt-title">BIR FORM 2307 WORKSHEET</div><div class="stmt-small">Certificate of Creditable Tax Withheld at Source · the numbers to copy into the official form</div></div>
+      <div style="text-align:right;"><div style="font-weight:800;">${quarter.replace('-', ' ')}</div><div class="stmt-small">${stmtDate(w.period_from)} – ${stmtDate(w.period_to)}</div></div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:14px;">${party('Part I · Payee (the supplier)', w.payee)}${party('Part II · Payor (the one who withheld)', w.payor)}</div>
+    <div class="stmt-section">Part III · Income payments and tax withheld</div>
+    <div class="stmt-table-wrap"><table class="stmt-table"><thead><tr><th>ATC</th><th class="r">${months[0]}</th><th class="r">${months[1]}</th><th class="r">${months[2]}</th><th class="r">Total</th><th class="r">Tax withheld</th></tr></thead><tbody>
+      ${w.rows.map(r => `<tr><td><strong>${escapeHtml(r.atc || '—')}</strong><div class="stmt-small">${r.rate ? (r.rate * 100) + '%' : ''}</div></td><td class="r">${fmtPHP(r.m1)}</td><td class="r">${fmtPHP(r.m2)}</td><td class="r">${fmtPHP(r.m3)}</td><td class="r">${fmtPHP(r.total)}</td><td class="r"><strong>${fmtPHP(r.tax)}</strong></td></tr>`).join('')}
+      <tr><td><strong>Total</strong></td><td></td><td></td><td></td><td class="r"><strong>${fmtPHP(tot.base)}</strong></td><td class="r"><strong>${fmtPHP(tot.tax)}</strong></td></tr>
+    </tbody></table></div>
+    <div class="stmt-foot">Download the official form from bir.gov.ph (BIR Form 2307), copy these numbers in, sign, and send it to the payee. ATC: WC = corporation, WI = individual; 158 = goods (1%), 160 = services (2%). Check with your accountant if unsure. Made with Nifti.</div>
+  </div>`;
+  let host = document.getElementById('statementView');
+  if(!host){ host = document.createElement('div'); host.id = 'statementView'; document.body.appendChild(host); }
+  document.body.classList.add('statement-open');
+  host.innerHTML = `<div class="stmt-toolbar"><button class="btn btn-outline" onclick="closeStatementOverlay()">✕ Close</button><button class="btn btn-outline" onclick="window.print()">🖨 Print / Save PDF</button></div>${html}`;
+  window.scrollTo(0, 0);
+}
+
+// Role-specific menu items (store for suppliers, watchdog for buyers).
+function syncRoleNavVisibility(){
+  document.body.setAttribute('data-role', currentAppRole);
+}
+
 function renderSidebarForViewAsRole(){
   const allowed = computeAllowedPages(getEffectiveRoles());
   document.querySelectorAll('.nav-item[data-page], .bnav-item[data-page], .more-sheet-item[data-page]').forEach(el => {
@@ -7470,6 +7717,7 @@ function renderViewAsRoleMenu(){
     `<div style="border-top:1px solid var(--border);margin:6px 0;"></div>`;
 }
 function navigate(page){
+  if(typeof syncRoleNavVisibility === 'function') syncRoleNavVisibility();
   // Every navigation is the highest-frequency, lowest-effort point to catch state changes
   // without instrumenting every one of the ~150 mutator functions individually — this plus
   // the periodic autosave and beforeunload/visibilitychange hooks (see initNiftiApp) cover
@@ -7525,6 +7773,9 @@ function navigate(page){
       updateAgingBadges();
     }
     if(page==='team'){ renderTeamPage(); }
+    if(page==='taxforms') renderTaxFormsPage();
+    if(page==='watchdog' && typeof renderWatchdogPage === 'function') renderWatchdogPage();
+    if(page==='store' && typeof renderStorePage === 'function') renderStorePage();
     if(page==='sales'){ renderSalesPage(); }
     if(page==='discover'){
       if(myBusiness){ realIncomingRequests = null; realDiscover.suppliers = null; realDiscover.buyers = null; }
@@ -13970,7 +14221,7 @@ const PAYMENT_PROOF_REQUIRED_THRESHOLD = 20000; // Section 5 #12 — configurabl
 // the receiving side is the one vouching for it. Checks still need an explicit clear/bounce step.
 // Reconciliation still runs on method + reference number: that's what gets matched against the
 // supplier's own e-wallet or bank statement.
-const PAYMENT_METHOD_LABELS = {gcash:'GCash', maya:'Maya', bank_transfer:'Bank Transfer', bank_deposit:'Bank Deposit', grabpay:'GrabPay', shopeepay:'ShopeePay', remittance:'Remittance', check:'Check', cash:'Cash', credit_note:'Credit Note'};
+const PAYMENT_METHOD_LABELS = {gcash:'GCash', maya:'Maya', bank_transfer:'Bank Transfer', bank_deposit:'Bank Deposit', grabpay:'GrabPay', shopeepay:'ShopeePay', remittance:'Remittance', check:'Check', cash:'Cash', credit_note:'Credit Note', ewt:'Tax withheld (BIR 2307)'};
 // What a person can pick when recording a payment — credit_note is only ever system-generated.
 const PAYMENT_METHOD_CHOICES = [
   ['gcash','GCash'], ['maya','Maya'], ['bank_transfer','Bank Transfer (InstaPay / PESONet / online banking)'],
@@ -14163,6 +14414,7 @@ function renderPaymentPanel(id){
     <div style="font-size:16px;font-weight:800;color:var(--ink);margin-bottom:4px;">Balance due: ${fmtPHP(balance)}${totalPaid>0 ? ` (of ${fmtPHP(total)})` : ''}</div>
     ${pendingLine}
     ${form}
+    ${renderEwtRecorder(po, side, room)}
   </div>`;
 }
 function togglePaymentFields(id){
