@@ -2565,6 +2565,7 @@
           <div id="buyerRecentMessagesBox"></div>
         </div>
         <div id="billsToPayPanel"></div>
+        <div id="watchdogDashCard"></div>
         <div id="homeInviteNudge"></div>
         <div id="buyerTodayPanel"></div>
         <div id="priceProtectionCard"></div>
@@ -7697,6 +7698,162 @@ function syncRoleNavVisibility(){
   document.body.setAttribute('data-role', currentAppRole);
 }
 
+/* ============ OWNER'S WATCHDOG + MARKET PRICE CHECK (Buyer Pro) ============
+   Checked on the server the moment a teammate sends an order (watchdog_check_order), so it can't
+   be skipped from a phone: above your agreed price, a price jump since last time, cheaper from
+   another supplier recently, switching away from the usual supplier, unusually big quantity.
+   Owners get a notification; the owner's own orders aren't flagged. Orders over the approval limit
+   from anyone but an Owner/GM are blocked outright. The market tab compares your prices with what
+   other Nifti buyers paid (only when 5+ buyers and 3+ suppliers, never names). */
+const WATCHDOG_KINDS = {
+  above_agreed: {icon: '📜', label: 'Above agreed price'},
+  price_jump: {icon: '📈', label: 'Price went up'},
+  cheaper_elsewhere: {icon: '🏷', label: 'Cheaper elsewhere'},
+  new_supplier: {icon: '🔀', label: 'New supplier'},
+  big_qty: {icon: '📦', label: 'Unusual quantity'},
+};
+let watchdogTab = 'alerts', watchdogFilter = 'open', watchdogAlerts = null, watchdogSettings = null, marketRows = null;
+const demoWatchdog = [
+  {id: -1, kind: 'above_agreed', title: 'Rebar 10mm ordered above your agreed price', detail: '₱195.00 vs agreed ₱180.00 with Metro Steel Co. (200 units)', po_number: 'PO-2026-0801', amount_at_risk: 3000, actor_name: 'Ramon (purchasing)', created_at: new Date(Date.now() - 3600e3).toISOString()},
+  {id: -2, kind: 'cheaper_elsewhere', title: 'Portland Cement 40kg was cheaper from Cebu Aggregates', detail: '₱262.00 from Northline vs ₱240.00 from Cebu Aggregates in the last 90 days', po_number: 'PO-2026-0797', amount_at_risk: 1100, actor_name: 'Ramon (purchasing)', created_at: new Date(Date.now() - 86400e3).toISOString()},
+  {id: -3, kind: 'big_qty', title: 'Welding Rods 3.2mm: 60 boxes, usually about 15', detail: "That's 4× your usual order size", po_number: 'PO-2026-0790', amount_at_risk: 0, actor_name: 'Liza (warehouse)', created_at: new Date(Date.now() - 3 * 86400e3).toISOString(), reviewed_at: new Date(Date.now() - 2 * 86400e3).toISOString(), reviewed_by_name: 'Owner', review_note: 'OK, for the Batangas project'},
+];
+async function renderWatchdogPage(){
+  const el = document.getElementById('watchdogContent');
+  if(!el) return;
+  const b = document.getElementById('watchdogBadge'); if(b) b.innerHTML = proBadge('watchdog');
+  if(!hasFeature('watchdog')){ el.innerHTML = lockedPanelHtml('watchdog', 'Get told the moment a teammate orders above your agreed price, pays more than last time, or switches to a pricier supplier. Plus how your prices compare with other buyers.'); return; }
+  if(myBusiness && !isPrivilegedUser()){ el.innerHTML = '<div class="panel-card">Only the Owner or General Manager sees the watchdog.</div>'; return; }
+  el.innerHTML = `<div class="role-toggle" style="margin-bottom:14px;">
+      <button class="${watchdogTab === 'alerts' ? 'active' : ''}" onclick="watchdogTab='alerts'; renderWatchdogPage()">🛡 Alerts</button>
+      <button class="${watchdogTab === 'market' ? 'active' : ''}" onclick="watchdogTab='market'; renderWatchdogPage()">📊 Prices</button>
+      <button class="${watchdogTab === 'settings' ? 'active' : ''}" onclick="watchdogTab='settings'; renderWatchdogPage()">⚙️ Rules</button>
+    </div><div id="watchdogTabBody"><div class="panel-card">Loading…</div></div>`;
+  if(watchdogTab === 'alerts') return renderWatchdogAlerts();
+  if(watchdogTab === 'market') return renderMarketPrices();
+  return renderWatchdogRules();
+}
+async function renderWatchdogAlerts(){
+  const body = document.getElementById('watchdogTabBody');
+  if(myBusiness){
+    if(watchdogAlerts === null){
+      const { data, error } = await sb.from('watchdog_alerts').select('*').order('created_at', {ascending: false}).limit(200);
+      if(error){ body.innerHTML = `<div class="panel-card">${escapeHtml(error.message)}</div>`; return; }
+      watchdogAlerts = data || [];
+    }
+  } else if(watchdogAlerts === null) watchdogAlerts = demoWatchdog.slice();
+  const since = Date.now() - 30 * 86400e3;
+  const recent = watchdogAlerts.filter(a => new Date(a.created_at).getTime() >= since);
+  const atRisk = recent.reduce((s, a) => s + Number(a.amount_at_risk || 0), 0);
+  const open = watchdogAlerts.filter(a => !a.reviewed_at);
+  const byPerson = {};
+  recent.forEach(a => { byPerson[a.actor_name || '?'] = (byPerson[a.actor_name || '?'] || 0) + 1; });
+  const top = Object.entries(byPerson).sort((a, b) => b[1] - a[1])[0];
+  const list = watchdogFilter === 'open' ? open : watchdogFilter === 'reviewed' ? watchdogAlerts.filter(a => a.reviewed_at) : watchdogAlerts;
+  body.innerHTML = `<div class="panel-card" style="margin-bottom:14px;"><div style="display:flex;gap:24px;flex-wrap:wrap;">
+      <div><div style="font-size:13px;opacity:.7;">Extra paid, last 30 days</div><div style="font-size:22px;font-weight:800;color:${atRisk >= 1 ? 'var(--danger)' : 'inherit'};">${fmtPHP(atRisk)}</div></div>
+      <div><div style="font-size:13px;opacity:.7;">To review</div><div style="font-size:22px;font-weight:800;">${open.length}</div></div>
+      ${top ? `<div><div style="font-size:13px;opacity:.7;">Most flagged</div><div style="font-size:16px;font-weight:800;margin-top:4px;">${escapeHtml(top[0])} (${top[1]})</div></div>` : ''}
+    </div>${!myBusiness ? '<div style="font-size:13px;opacity:.6;margin-top:8px;">Examples. Real alerts appear when teammates send orders.</div>' : ''}</div>
+    <div class="chip-filter" style="margin-bottom:10px;">${['open', 'reviewed', 'all'].map(f => `<div class="chip ${watchdogFilter === f ? 'active' : ''}" onclick="watchdogFilter='${f}'; renderWatchdogAlerts()">${f === 'open' ? 'To review' : f === 'reviewed' ? 'Reviewed' : 'All'}</div>`).join('')}</div>
+    ${list.length ? list.map(a => { const k = WATCHDOG_KINDS[a.kind] || {icon: '⚠', label: a.kind}; return `<div class="panel-card" style="margin-bottom:10px;${a.reviewed_at ? 'opacity:.7;' : ''}">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:200px;"><div style="font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;opacity:.65;">${k.icon} ${k.label}</div>
+          <div style="font-weight:800;font-size:15.5px;margin-top:2px;">${escapeHtml(a.title)}</div>
+          <div style="font-size:14px;opacity:.85;margin-top:2px;">${escapeHtml(a.detail || '')}</div>
+          <div style="font-size:13px;opacity:.65;margin-top:4px;">${escapeHtml(a.po_number || '')} · by ${escapeHtml(a.actor_name || '?')} · ${new Date(a.created_at).toLocaleString('en-PH', {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}</div>
+          ${a.reviewed_at ? `<div style="font-size:13px;margin-top:4px;">✓ Reviewed by ${escapeHtml(a.reviewed_by_name || '')}${a.review_note ? ': ' + escapeHtml(a.review_note) : ''}</div>` : ''}</div>
+        <div style="text-align:right;">${Number(a.amount_at_risk) >= 1 ? `<div style="font-weight:800;color:var(--danger);font-size:17px;">+${fmtPHP(a.amount_at_risk)}</div>` : ''}
+          <div style="display:flex;gap:6px;margin-top:6px;justify-content:flex-end;flex-wrap:wrap;">
+            ${a.po_id ? `<button class="btn btn-outline" style="padding:5px 10px;font-size:13.5px;" onclick="openOrderDetailModal('${a.po_id}')">Order</button>` : ''}
+            <button class="btn ${a.reviewed_at ? 'btn-outline' : 'btn-primary'}" style="padding:5px 10px;font-size:13.5px;" onclick="reviewWatchdogAlert(${a.id}, ${a.reviewed_at ? 'true' : 'false'})">${a.reviewed_at ? 'Reopen' : 'Mark reviewed'}</button></div></div>
+      </div></div>`; }).join('')
+    : `<div class="panel-card" style="text-align:center;padding:26px;"><div style="font-size:32px;">🛡</div><div style="font-weight:800;margin-top:6px;">${watchdogFilter === 'open' ? 'Nothing to review' : 'No alerts yet'}</div><div style="font-size:14.5px;opacity:.8;margin-top:4px;">Nifti checks every order your team sends. You'll get a notification if something looks off.</div></div>`}`;
+}
+async function renderWatchdogDashCard(){
+  const el = document.getElementById('watchdogDashCard');
+  if(!el) return;
+  el.innerHTML = '';
+  if(!hasFeature('watchdog') || (myBusiness && !isPrivilegedUser())) return;
+  let open = [];
+  if(myBusiness){
+    const { data } = await sb.from('watchdog_alerts').select('amount_at_risk').is('reviewed_at', null).limit(200);
+    open = data || [];
+  } else open = demoWatchdog.filter(a => !a.reviewed_at);
+  if(!open.length) return;
+  const risk = open.reduce((s, a) => s + Number(a.amount_at_risk || 0), 0);
+  el.innerHTML = `<div class="panel-card" style="margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;cursor:pointer;" onclick="navigate('watchdog')">
+    <div><div style="font-weight:800;font-size:16px;">🛡 Watchdog: ${open.length} order${open.length > 1 ? 's' : ''} to look at</div>
+    <div style="font-size:14px;opacity:.8;">${risk >= 1 ? fmtPHP(risk) + ' more than it should have cost' : 'Unusual orders from your team'}</div></div>
+    <span class="lnk">Review →</span></div>`;
+}
+async function reviewWatchdogAlert(id, reopen){
+  const note = reopen ? null : prompt('Note (optional), e.g. "OK, rush order"', '');
+  if(note === null && !reopen) return;
+  if(myBusiness){
+    const { error } = await sb.rpc('review_watchdog_alert', {p_id: id, p_note: note || null});
+    if(error){ showToast(error.message, 'error'); return; }
+    watchdogAlerts = null;
+  } else {
+    const a = watchdogAlerts.find(x => x.id === id);
+    if(a){ a.reviewed_at = reopen ? null : new Date().toISOString(); a.reviewed_by_name = 'You'; a.review_note = note || null; }
+  }
+  renderWatchdogAlerts();
+}
+async function renderMarketPrices(){
+  const body = document.getElementById('watchdogTabBody');
+  if(!hasFeature('market_price')){ body.innerHTML = lockedPanelHtml('market_price', 'See if you pay more than other businesses for the same items.'); return; }
+  if(marketRows === null){
+    if(myBusiness){
+      const { data, error } = await sb.rpc('my_market_prices');
+      if(error){ body.innerHTML = `<div class="panel-card">${escapeHtml(error.message)}</div>`; return; }
+      marketRows = data || [];
+    } else marketRows = [
+      {product: 'Portland Cement 40kg', my_last: 262, median: 241, low: 236, high: 248, diff_pct: 8.7, buyers_band: '10+', enough_data: true},
+      {product: 'Steel Rebar 12mm', my_last: 61, median: 64, low: 62, high: 67, diff_pct: -4.7, buyers_band: '5+', enough_data: true},
+      {product: 'Welding Rods 3.2mm', my_last: 1450, enough_data: false},
+    ];
+  }
+  const ready = marketRows.filter(r => r.enough_data), waiting = marketRows.filter(r => !r.enough_data);
+  const over = ready.filter(r => r.diff_pct > 3);
+  body.innerHTML = `<div class="panel-card" style="margin-bottom:14px;font-size:14.5px;line-height:1.5;">
+      Your latest price vs what other Nifti buyers paid in the last 90 days. We only show a price when <strong>5+ other buyers</strong> bought the same item from <strong>3+ suppliers</strong>, as a middle price and range, never names. ${over.length ? `<div style="margin-top:6px;font-weight:700;color:var(--danger);">You pay above market on ${over.length} item${over.length > 1 ? 's' : ''}. Worth asking your supplier.</div>` : ''}
+      ${!myBusiness ? '<div style="font-size:13px;opacity:.6;margin-top:6px;">Examples.</div>' : ''}</div>
+    ${ready.map(r => { const up = r.diff_pct > 3, down = r.diff_pct < -3; return `<div class="panel-card" style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;">
+      <div><div style="font-weight:800;">${escapeHtml(r.product)}</div><div style="font-size:13.5px;opacity:.75;">Others pay ${fmtPHP(r.low)}–${fmtPHP(r.high)} · middle ${fmtPHP(r.median)} · ${r.buyers_band} buyers</div></div>
+      <div style="text-align:right;"><div style="font-size:13px;opacity:.7;">You pay</div><div style="font-weight:800;font-size:17px;">${fmtPHP(r.my_last)}</div>
+        <span class="status-pill" style="font-size:13px;background:${up ? 'var(--danger-soft)' : down ? 'var(--green-soft)' : 'var(--bg)'};color:${up ? 'var(--danger)' : down ? 'var(--green)' : 'inherit'};">${up ? r.diff_pct + '% above' : down ? Math.abs(r.diff_pct) + '% below' : 'About market'}</span></div>
+    </div></div>`; }).join('')}
+    ${waiting.length ? `<div class="panel-card" style="opacity:.8;"><div style="font-weight:800;margin-bottom:4px;">Waiting for enough data (${waiting.length})</div><div style="font-size:14px;">${waiting.slice(0, 30).map(r => escapeHtml(r.product)).join(' · ')}</div><div style="font-size:13px;opacity:.7;margin-top:6px;">These fill in automatically as more businesses order on Nifti.</div></div>` : ''}
+    ${!marketRows.length ? '<div class="panel-card">Order a few items through Nifti and they show up here.</div>' : ''}`;
+}
+async function renderWatchdogRules(){
+  const body = document.getElementById('watchdogTabBody');
+  if(watchdogSettings === null){
+    if(myBusiness){ const { data } = await sb.rpc('my_watchdog_settings'); watchdogSettings = data || {}; } else watchdogSettings = {};
+  }
+  const s = watchdogSettings, ch = s.checks || {};
+  const on = k => ch[k] !== false;
+  body.innerHTML = `<div class="panel-card">
+    <div class="toggle-row"><div><div class="toggle-txt">Watch my team's orders</div><div class="toggle-sub">Your own orders are never flagged.</div></div><div class="switch ${s.enabled !== false ? 'on' : ''}" id="wdEnabled" onclick="this.classList.toggle('on')"><div class="knob"></div></div></div>
+    ${Object.entries(WATCHDOG_KINDS).map(([k, v]) => `<div class="toggle-row"><div><div class="toggle-txt">${v.icon} ${v.label}</div></div><div class="switch ${on(k) ? 'on' : ''}" data-wdcheck="${k}" onclick="this.classList.toggle('on')"><div class="knob"></div></div></div>`).join('')}
+    <div class="field" style="margin-top:10px;max-width:260px;"><label>Ignore price differences under (%)</label><input type="number" id="wdTol" min="0" max="50" step="0.5" value="${s.tolerance_pct != null ? s.tolerance_pct : 3}"></div>
+    <button class="btn btn-primary" onclick="saveWatchdogRules()">Save rules</button>
+    <div style="font-size:13.5px;opacity:.75;margin-top:12px;">Approval limit: set it in Settings → Spending Approval. Orders over it from anyone but an Owner or General Manager are now blocked until approved, even from another phone.</div>
+  </div>`;
+}
+async function saveWatchdogRules(){
+  const checks = {};
+  document.querySelectorAll('[data-wdcheck]').forEach(el => { checks[el.getAttribute('data-wdcheck')] = el.classList.contains('on'); });
+  const next = {enabled: document.getElementById('wdEnabled').classList.contains('on'), tolerance_pct: Number(document.getElementById('wdTol').value) || 0, checks};
+  if(myBusiness){
+    const { error } = await sb.rpc('set_watchdog_settings', {p_settings: next});
+    if(error){ showToast(error.message, 'error'); return; }
+  }
+  watchdogSettings = next;
+  showToast('Saved.', 'success');
+}
+
 function renderSidebarForViewAsRole(){
   const allowed = computeAllowedPages(getEffectiveRoles());
   document.querySelectorAll('.nav-item[data-page], .bnav-item[data-page], .more-sheet-item[data-page]').forEach(el => {
@@ -7774,7 +7931,7 @@ function navigate(page){
     }
     if(page==='team'){ renderTeamPage(); }
     if(page==='taxforms') renderTaxFormsPage();
-    if(page==='watchdog' && typeof renderWatchdogPage === 'function') renderWatchdogPage();
+    if(page==='watchdog'){ watchdogAlerts = null; marketRows = null; renderWatchdogPage(); }
     if(page==='store' && typeof renderStorePage === 'function') renderStorePage();
     if(page==='sales'){ renderSalesPage(); }
     if(page==='discover'){
@@ -7810,7 +7967,7 @@ function navigate(page){
       renderPriceProtectionCard();
       renderHomeInviteNudge();
       renderPhoneNotifNudge();
-      if(currentAppRole === 'supplier') renderWhoOwesMe(); else renderBillsToPay();
+      if(currentAppRole === 'supplier') renderWhoOwesMe(); else { renderBillsToPay(); renderWatchdogDashCard(); }
     }
     if(page==='messages' && !window._msgInit){
       renderConversationList();
